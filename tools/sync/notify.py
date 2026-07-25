@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 _ARTICLE_ID_RE = re.compile(r"M\.(\d+)\.A\.[0-9A-Fa-f]+")
-_TAIPEI = ZoneInfo("Asia/Taipei")
+_DISPLAY_TZ = ZoneInfo("Australia/Melbourne")
 
 BOOKMAKER_NAMES = {"sportsbet": "Sportsbet", "pointsbetau": "PointsBet"}
 
@@ -198,8 +198,8 @@ def _post_time_note(article_url: str) -> str | None:
         posted_utc = datetime.fromtimestamp(int(m.group(1)), tz=timezone.utc)
     except (ValueError, OSError):
         return None
-    posted_local = posted_utc.astimezone(_TAIPEI)
-    return f"📅 發文於 {posted_local.strftime('%m/%d %H:%M')}"
+    posted_local = posted_utc.astimezone(_DISPLAY_TZ)
+    return f"📅 發文於 {posted_local.strftime('%m/%d %H:%M')}(墨爾本時間)"
 
 
 def _matching_outcome(bet, market: dict) -> dict | None:
