@@ -2,6 +2,8 @@ import json
 import sys
 import traceback
 
+import requests
+
 from . import extract, feed, markets, notify
 from .config import STATE_FILE, Config
 
@@ -32,11 +34,20 @@ def process_article(cfg: Config, author: str, entry: dict) -> None:
         return
 
     bet_results = []
+    # Multiple bets in one article are often the same match (e.g. h2h +
+    # spreads + totals on one game) — cache the event lookup per matchup
+    # instead of re-scanning candidate leagues for each bet.
+    event_cache: dict[tuple[str | None, str | None], tuple | None] = {}
     for bet in extraction.bets:
         matched = None
         bookmakers: list[dict] = []
+        cache_key = (bet.away_team_en or bet.away_team_zh, bet.home_team_en or bet.home_team_zh)
         try:
-            matched = markets.find_event(bet, cfg.data_api_key)
+            if cache_key in event_cache:
+                matched = event_cache[cache_key]
+            else:
+                matched = markets.find_event(bet, cfg.data_api_key)
+                event_cache[cache_key] = matched
             if matched:
                 sport_key, event = matched
                 wanted = [bet.market] if bet.market != "other" else ["h2h"]
@@ -84,9 +95,19 @@ def run() -> int:
                 print(f"processing {key}")
                 process_article(cfg, author, entry)
                 seen[key] = {"status": "notified"}
-            except Exception:
+            except Exception as err:
                 traceback.print_exc()
-                if attempts >= MAX_ATTEMPTS:
+                rate_limited = (
+                    isinstance(err, requests.HTTPError)
+                    and err.response is not None
+                    and err.response.status_code == 429
+                )
+                if rate_limited:
+                    # Every fallback model is exhausted right now. This
+                    # isn't a bug — it clears on its own — so keep retrying
+                    # every run without burning down attempts or alerting.
+                    seen[key] = {"status": "pending", "attempts": 0}
+                elif attempts >= MAX_ATTEMPTS:
                     seen[key] = {"status": "failed"}
                     try:
                         notify.broadcast(

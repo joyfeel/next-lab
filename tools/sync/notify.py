@@ -51,7 +51,19 @@ MARKET_LABELS = {
 
 def market_label(bet) -> str:
     by_sport = MARKET_LABELS_BY_SPORT.get(bet.sport, {})
-    return by_sport.get(bet.market) or MARKET_LABELS.get(bet.market) or bet.market_description
+    label = by_sport.get(bet.market) or MARKET_LABELS.get(bet.market) or bet.market_description
+    if bet.is_team_total:
+        label += " · 單隊得分(非全場)"
+    return label
+
+
+_RANK_LABELS = {1: "🥇 首選", 2: "🥈 次選", 3: "🥉 第三選擇"}
+
+
+def rank_label(rank: int | None) -> str:
+    if rank is None:
+        return "推薦"
+    return _RANK_LABELS.get(rank, f"第 {rank} 選擇")
 
 
 def esc(text: str | None) -> str:
@@ -259,20 +271,35 @@ def _bet_block(bet, matched, bookmakers: list[dict]) -> tuple[str, list[tuple[st
         countdown = _kickoff_countdown(matched[1].get("commence_time"))
         if countdown:
             lines.append(countdown)
-    lines.append(f"👉 推薦：<b>{esc(_pick_description(bet))}</b>")
+    lines.append(f"👉 {rank_label(bet.rank)}：<b>{esc(_pick_description(bet))}</b>")
     lines.append(f"📖 對應盤口：{esc(market_label(bet))}")
 
     buttons: list[tuple[str, str]] = []
     if bet.odds_claimed:
         lines.append(f"📰 原文賠率：{esc(bet.odds_claimed)}")
 
-    if matched and bookmakers:
+    tag = (bet.home_team_en or bet.home_team_zh or "")[:8].strip()
+
+    if bet.is_team_total:
+        # No standalone team-total market on Sportsbet/PointsBet — the
+        # whole-match total is a different bet with unrelated odds, so
+        # don't show it as if it matched.
+        if matched and bookmakers:
+            lines.append("⚠️ 單隊得分盤,Sportsbet / PointsBet 無此獨立市場,請自行至下方連結查看")
+            for bm in bookmakers:
+                link = _bookmaker_deep_link(bm)
+                if link:
+                    name = BOOKMAKER_NAMES.get(bm.get("key", ""), bm.get("title", "?"))
+                    label = f"開啟 {name}" + (f" · {tag}" if tag else "")
+                    buttons.append((label, link))
+        else:
+            lines.append("⚠️ 單隊得分盤,Sportsbet / PointsBet 無此獨立市場")
+    elif matched and bookmakers:
         odds_lines, link_buttons = _odds_lines(bet, bookmakers)
         if odds_lines:
             lines.append("💰 目前賠率：")
             lines.extend(odds_lines)
         # Disambiguate buttons when an article covers more than one match.
-        tag = (bet.home_team_en or bet.home_team_zh or "")[:8].strip()
         buttons = [(f"{label} · {tag}" if tag else label, url) for label, url in link_buttons]
     else:
         lines.append("⚠️ Sportsbet / PointsBet 目前未開盤,暫無連結")
@@ -297,6 +324,12 @@ def format_article_message(
         "",
         f"📋 {esc(extraction.summary)}",
     ]
+
+    # Ranked bets are alternatives to pick ONE of (e.g. "A＞B＞C"), not
+    # independent picks — surface them in that order and say so up front.
+    if any(bet.rank is not None for bet, _, _ in bet_results):
+        parts.append("💡 以下為同一場比賽的排序選項,依風險承受度擇一下注即可")
+        bet_results = sorted(bet_results, key=lambda t: (t[0].rank is None, t[0].rank or 0))
 
     buttons: list[tuple[str, str]] = []
     seen_urls: set[str] = set()
