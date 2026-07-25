@@ -1,0 +1,14 @@
+# next.js
+node_modules/
+.next/
+out/
+next-env.d.ts
+
+# misc
+.env
+.DS_Store
+
+# python tooling
+__pycache__/
+*.pyc
+.venv/
