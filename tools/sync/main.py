@@ -24,7 +24,11 @@ def process_article(cfg: Config, author: str, entry: dict) -> None:
     extraction = extract.extract(entry["title"], article["body"], cfg.gemini_api_key)
 
     if extraction is None or not extraction.is_recommendation or not extraction.bets:
-        print("  no actionable content, skipping")
+        text, buttons = notify.format_non_bet_message(
+            author, entry["title"], entry["url"], extraction
+        )
+        notify.send_message(cfg.telegram_bot_token, cfg.telegram_chat_id, text, buttons)
+        print("  delivered (non-recommendation)")
         return
 
     bet_results = []

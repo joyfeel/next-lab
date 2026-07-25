@@ -1,4 +1,5 @@
 import json
+import time
 
 import requests
 from pydantic import BaseModel
@@ -94,21 +95,27 @@ class Extraction(BaseModel):
 
 
 def extract(title: str, body: str, api_key: str) -> Extraction | None:
-    resp = requests.post(
-        API_URL,
-        headers={"x-goog-api-key": api_key},
-        json={
-            "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-            "contents": [
-                {"role": "user", "parts": [{"text": f"標題: {title}\n\n{body}"}]}
-            ],
-            "generationConfig": {
-                "responseMimeType": "application/json",
-                "responseSchema": _EXTRACTION_SCHEMA,
+    resp = None
+    for attempt in range(4):
+        resp = requests.post(
+            API_URL,
+            headers={"x-goog-api-key": api_key},
+            json={
+                "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+                "contents": [
+                    {"role": "user", "parts": [{"text": f"標題: {title}\n\n{body}"}]}
+                ],
+                "generationConfig": {
+                    "responseMimeType": "application/json",
+                    "responseSchema": _EXTRACTION_SCHEMA,
+                },
             },
-        },
-        timeout=120,
-    )
+            timeout=120,
+        )
+        if resp.status_code == 429 and attempt < 3:
+            time.sleep(5 * (attempt + 1))
+            continue
+        break
     resp.raise_for_status()
     candidates = resp.json().get("candidates", [])
     if not candidates:

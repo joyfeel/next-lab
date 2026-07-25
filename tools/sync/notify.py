@@ -1,4 +1,6 @@
+import difflib
 import html
+from datetime import datetime, timezone
 
 import requests
 
@@ -97,25 +99,106 @@ def _bookmaker_deep_link(bookmaker: dict) -> str | None:
     return bookmaker.get("link")
 
 
+def _parse_float(value) -> float | None:
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _kickoff_countdown(commence_time: str | None) -> str | None:
+    if not commence_time:
+        return None
+    try:
+        kickoff = datetime.fromisoformat(commence_time.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    delta_min = int((kickoff - datetime.now(timezone.utc)).total_seconds() // 60)
+    if delta_min <= 0:
+        return "⚠️ 已開賽或即將開賽,把握剩餘時間"
+    hours, mins = divmod(delta_min, 60)
+    if hours > 0:
+        return f"⏰ 距離開賽還有 {hours} 小時 {mins} 分"
+    return f"⏰ 距離開賽還有 {mins} 分鐘"
+
+
+def _matching_outcome(bet, market: dict) -> dict | None:
+    """Find the outcome in this market that matches the tipster's pick."""
+    sel = (bet.selection or "").strip().lower()
+    outcomes = market.get("outcomes", [])
+    if not outcomes:
+        return None
+
+    for o in outcomes:
+        if (o.get("name") or "").strip().lower() == sel:
+            return o
+
+    aliases = {"大": "over", "小": "under", "是": "yes", "否": "no"}
+    alias_sel = aliases.get(sel, sel)
+    for o in outcomes:
+        if (o.get("name") or "").strip().lower() == alias_sel:
+            return o
+
+    # Team-name spelling can drift between our translation and the
+    # bookmaker's own naming — fall back to fuzzy matching.
+    scored = sorted(
+        (
+            (difflib.SequenceMatcher(None, sel, (o.get("name") or "").lower()).ratio(), o)
+            for o in outcomes
+        ),
+        key=lambda t: t[0],
+        reverse=True,
+    )
+    best_score, best = scored[0]
+    return best if best_score >= 0.6 else None
+
+
 def _odds_lines(bet, bookmakers: list[dict]) -> tuple[list[str], list[tuple[str, str]]]:
-    """Current-odds text per bookmaker + deep-link buttons (event page)."""
+    """Current price for the tipster's exact pick per bookmaker, with a
+    comparison against the odds quoted in the post and a note if the line
+    itself has moved since — the two things that matter for deciding
+    whether to bet now."""
+    claimed = _parse_float(bet.odds_claimed)
+    bet_line = _parse_float(bet.line)
     lines: list[str] = []
     buttons: list[tuple[str, str]] = []
+    line_shift_noted = False
+
     for bm in bookmakers:
         name = BOOKMAKER_NAMES.get(bm.get("key", ""), bm.get("title", "?"))
         market = next(
             (m for m in bm.get("markets", []) if m.get("key") == bet.market), None
         ) or next((m for m in bm.get("markets", []) if m.get("key") == "h2h"), None)
+
         if market:
-            shown = market["key"]
-            prices = " / ".join(
-                f"{o.get('name')}"
-                + (f" {o.get('point')}" if o.get("point") is not None else "")
-                + f" @ {o.get('price')}"
-                for o in market.get("outcomes", [])
-            )
-            suffix = "" if shown == bet.market else f"(僅提供 {shown})"
-            lines.append(f"• {esc(name)} {suffix}: {esc(prices)}")
+            outcome = _matching_outcome(bet, market)
+            if outcome:
+                price = outcome.get("price")
+                point = outcome.get("point")
+                arrow = ""
+                if claimed is not None and price is not None:
+                    if price > claimed + 0.005:
+                        arrow = " 📈比原文好"
+                    elif price < claimed - 0.005:
+                        arrow = " 📉比原文差"
+                point_txt = f" {point}" if point is not None else ""
+                lines.append(f"• {esc(name)}：{esc(outcome.get('name'))}{point_txt} @ {price}{arrow}")
+                if (
+                    not line_shift_noted
+                    and point is not None
+                    and bet_line is not None
+                    and abs(point - bet_line) >= 0.5
+                ):
+                    lines.append(f"  ⚠️ 盤口已從原文的 {bet.line} 變動到 {point}")
+                    line_shift_noted = True
+            else:
+                # Couldn't match the exact pick (e.g. an "other" market
+                # shown via its h2h fallback) — display as context only.
+                prices = " / ".join(
+                    f"{o.get('name')} @ {o.get('price')}" for o in market.get("outcomes", [])
+                )
+                lines.append(f"• {esc(name)} (參考 {esc(market['key'])}): {esc(prices)}")
+
         link = _bookmaker_deep_link(bm)
         if link:
             buttons.append((f"開啟 {name}", link))
@@ -131,15 +214,21 @@ def _bet_block(bet, matched, bookmakers: list[dict]) -> tuple[str, list[tuple[st
         ]
         if x
     )
+
     lines: list[str] = []
     if matchup:
         lines.append(f"⚔️ <b>{esc(matchup)}</b>")
+    if matched:
+        countdown = _kickoff_countdown(matched[1].get("commence_time"))
+        if countdown:
+            lines.append(countdown)
     lines.append(f"👉 推薦：<b>{esc(_pick_description(bet))}</b>")
     lines.append(f"📖 對應盤口：{esc(market_label(bet))}")
-    if bet.odds_claimed:
-        lines.append(f"📰 文中賠率：{esc(bet.odds_claimed)}")
 
     buttons: list[tuple[str, str]] = []
+    if bet.odds_claimed:
+        lines.append(f"📰 原文賠率：{esc(bet.odds_claimed)}")
+
     if matched and bookmakers:
         odds_lines, link_buttons = _odds_lines(bet, bookmakers)
         if odds_lines:
@@ -187,3 +276,20 @@ def format_article_message(
 
     buttons.append(("PTT 原文", article_url))
     return "\n".join(parts), buttons
+
+
+def format_non_bet_message(
+    author: str, title: str, article_url: str, extraction
+) -> tuple[str, list[tuple[str, str]]]:
+    """A post that isn't a betting recommendation (recap, chat, event
+    thread, etc.) — still surfaced, clearly labeled as non-actionable."""
+    summary = extraction.summary if extraction else "(內容無法解析)"
+    text = "\n".join(
+        [
+            f"📝 <b>{esc(author)}</b> 發文(非投注推薦)",
+            f"<b>{esc(title)}</b>",
+            "",
+            esc(summary),
+        ]
+    )
+    return text, [("PTT 原文", article_url)]
