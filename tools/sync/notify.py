@@ -4,14 +4,51 @@ import requests
 
 BOOKMAKER_NAMES = {"sportsbet": "Sportsbet", "pointsbetau": "PointsBet"}
 
-# Beginner-friendly label for each internal market key, with the bookmaker's
-# own terminology alongside so a first-time user can find the right tab.
+# Sportsbet/PointsBet's own tab names differ per sport, not just per market
+# type — e.g. baseball's spread market is "Run Line", basketball's is "Line",
+# soccer's is "Handicap", and hockey's win market is "Money Line" rather than
+# "Head to Head". Sourced from Sportsbet's help centre articles per sport.
+MARKET_LABELS_BY_SPORT: dict[str, dict[str, str]] = {
+    "baseball": {
+        "h2h": "獨贏 (Head to Head)",
+        "spreads": "讓分 (Run Line)",
+        "totals": "大小分 (Total Runs)",
+    },
+    "basketball": {
+        "h2h": "獨贏 (Head to Head)",
+        "spreads": "讓分 (Line)",
+        "totals": "大小分 (Total Points)",
+    },
+    "soccer": {
+        "h2h": "獨贏 (Head to Head)",
+        "spreads": "讓分 (Handicap)",
+        "totals": "大小分 (Total Goals)",
+        "btts": "雙方都得分 (Both Teams to Score)",
+    },
+    "hockey": {
+        "h2h": "獨贏 (Money Line)",
+        "spreads": "讓分 (Puck Line)",
+        "totals": "大小分 (Total Goals)",
+    },
+    "tennis": {
+        "h2h": "獨贏 (Head to Head)",
+        "spreads": "讓分 (Game/Set Handicap)",
+        "totals": "大小分 (Total Match Games)",
+    },
+}
+
+# Fallback for a sport not in the table above (or "other").
 MARKET_LABELS = {
     "h2h": "獨贏 (Head to Head)",
     "spreads": "讓分 (Line / Handicap)",
     "totals": "大小分 (Total Points / Total Runs — Over/Under)",
     "btts": "雙方都得分 (Both Teams to Score)",
 }
+
+
+def market_label(bet) -> str:
+    by_sport = MARKET_LABELS_BY_SPORT.get(bet.sport, {})
+    return by_sport.get(bet.market) or MARKET_LABELS.get(bet.market) or bet.market_description
 
 
 def esc(text: str | None) -> str:
@@ -94,13 +131,11 @@ def _bet_block(bet, matched, bookmakers: list[dict]) -> tuple[str, list[tuple[st
         ]
         if x
     )
-    market_label = MARKET_LABELS.get(bet.market, bet.market_description)
-
     lines: list[str] = []
     if matchup:
         lines.append(f"⚔️ <b>{esc(matchup)}</b>")
     lines.append(f"👉 推薦：<b>{esc(_pick_description(bet))}</b>")
-    lines.append(f"📖 對應盤口：{esc(market_label)}")
+    lines.append(f"📖 對應盤口：{esc(market_label(bet))}")
     if bet.odds_claimed:
         lines.append(f"📰 文中賠率：{esc(bet.odds_claimed)}")
 
