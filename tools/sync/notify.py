@@ -76,6 +76,30 @@ def send_message(
     resp.raise_for_status()
 
 
+def _team_bilingual(en: str | None, zh: str | None) -> str:
+    """'中文名 (English Name)' — the English half is what's actually shown
+    on the Sportsbet/PointsBet site, so keep both together everywhere a
+    team name appears."""
+    if zh and en:
+        return f"{zh} ({en})"
+    return en or zh or ""
+
+
+def _matchup(bet) -> str:
+    away = _team_bilingual(bet.away_team_en, bet.away_team_zh)
+    home = _team_bilingual(bet.home_team_en, bet.home_team_zh)
+    return " @ ".join(x for x in [away, home] if x)
+
+
+def _resolve_team_name(bet, english_name: str) -> str:
+    """If `english_name` is one of the bet's two teams, render it as
+    '中文名 (English Name)'; otherwise return it unchanged (e.g. "Draw")."""
+    for en, zh in ((bet.home_team_en, bet.home_team_zh), (bet.away_team_en, bet.away_team_zh)):
+        if en and english_name and en.strip().lower() == english_name.strip().lower():
+            return _team_bilingual(en, zh)
+    return english_name
+
+
 def _pick_description(bet) -> str:
     """Beginner-friendly rendering of 'what to bet', in plain language."""
     sel = (bet.selection or "").strip()
@@ -83,12 +107,14 @@ def _pick_description(bet) -> str:
         side = {"over": "大 (Over)", "under": "小 (Under)"}.get(sel.lower(), sel)
         return f"{side} {bet.line or ''}".strip()
     if bet.market == "spreads":
-        return f"{sel} {bet.line or ''}".strip()
+        return f"{_resolve_team_name(bet, sel)} {bet.line or ''}".strip()
     if bet.market == "btts":
         yn = {"yes": "是 (Yes)", "no": "否 (No)"}.get(sel.lower(), sel)
         return f"雙方都進球：{yn}"
     if bet.market == "h2h":
-        return f"獨贏 {sel}"
+        if sel.lower() == "draw":
+            return "獨贏 和局 (Draw)"
+        return f"獨贏 {_resolve_team_name(bet, sel)}"
     return f"{sel} {bet.line or ''}".strip()
 
 
@@ -206,14 +232,7 @@ def _odds_lines(bet, bookmakers: list[dict]) -> tuple[list[str], list[tuple[str,
 
 
 def _bet_block(bet, matched, bookmakers: list[dict]) -> tuple[str, list[tuple[str, str]]]:
-    matchup = " @ ".join(
-        x
-        for x in [
-            bet.away_team_en or bet.away_team_zh,
-            bet.home_team_en or bet.home_team_zh,
-        ]
-        if x
-    )
+    matchup = _matchup(bet)
 
     lines: list[str] = []
     if matchup:
