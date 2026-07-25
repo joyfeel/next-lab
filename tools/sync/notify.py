@@ -1,9 +1,14 @@
 import difflib
 import html
+import re
 import traceback
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import requests
+
+_ARTICLE_ID_RE = re.compile(r"M\.(\d+)\.A\.[0-9A-Fa-f]+")
+_TAIPEI = ZoneInfo("Asia/Taipei")
 
 BOOKMAKER_NAMES = {"sportsbet": "Sportsbet", "pointsbetau": "PointsBet"}
 
@@ -183,6 +188,20 @@ def _kickoff_countdown(commence_time: str | None) -> str | None:
     return f"⏰ 距離開賽還有 {mins} 分鐘"
 
 
+def _post_time_note(article_url: str) -> str | None:
+    """PTT article IDs embed a Unix timestamp ('M.<ts>.A.<hash>') — no need
+    to parse the page's own date text, and it's precise to the second."""
+    m = _ARTICLE_ID_RE.search(article_url)
+    if not m:
+        return None
+    try:
+        posted_utc = datetime.fromtimestamp(int(m.group(1)), tz=timezone.utc)
+    except (ValueError, OSError):
+        return None
+    posted_local = posted_utc.astimezone(_TAIPEI)
+    return f"📅 發文於 {posted_local.strftime('%m/%d %H:%M')}"
+
+
 def _matching_outcome(bet, market: dict) -> dict | None:
     """Find the outcome in this market that matches the tipster's pick."""
     sel = (bet.selection or "").strip().lower()
@@ -325,6 +344,11 @@ def format_article_message(
     parts = [
         f"🏟 <b>{esc(author)}</b> 新推薦",
         f"<b>{esc(title)}</b>",
+    ]
+    post_time = _post_time_note(article_url)
+    if post_time:
+        parts.append(post_time)
+    parts += [
         "",
         f"📋 {esc(extraction.summary)}",
     ]
@@ -358,10 +382,16 @@ def format_non_bet_message(
     """A post that isn't a betting recommendation (recap, chat, event
     thread, etc.) — still surfaced, clearly labeled as non-actionable."""
     summary = extraction.summary if extraction else "(內容無法解析)"
+    header = [
+        f"📝 <b>{esc(author)}</b> 發文(非投注推薦)",
+        f"<b>{esc(title)}</b>",
+    ]
+    post_time = _post_time_note(article_url)
+    if post_time:
+        header.append(post_time)
     text = "\n".join(
-        [
-            f"📝 <b>{esc(author)}</b> 發文(非投注推薦)",
-            f"<b>{esc(title)}</b>",
+        header
+        + [
             "",
             esc(summary),
         ]
