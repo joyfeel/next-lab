@@ -11,41 +11,32 @@ BOOKMAKER_NAMES = {"sportsbet": "Sportsbet", "pointsbetau": "PointsBet"}
 # type — e.g. baseball's spread market is "Run Line", basketball's is "Line",
 # soccer's is "Handicap", and hockey's win market is "Money Line" rather than
 # "Head to Head". Sourced from Sportsbet's help centre articles per sport.
+# English only: the Chinese market name is already stated by the pick itself
+# (rank_label + _pick_description) — repeating it here just says the same
+# thing twice. This line's only job is "which tab to click on the site".
 MARKET_LABELS_BY_SPORT: dict[str, dict[str, str]] = {
-    "baseball": {
-        "h2h": "獨贏 (Head to Head)",
-        "spreads": "讓分 (Run Line)",
-        "totals": "大小分 (Total Runs)",
-    },
-    "basketball": {
-        "h2h": "獨贏 (Head to Head)",
-        "spreads": "讓分 (Line)",
-        "totals": "大小分 (Total Points)",
-    },
+    "baseball": {"h2h": "Head to Head", "spreads": "Run Line", "totals": "Total Runs"},
+    "basketball": {"h2h": "Head to Head", "spreads": "Line", "totals": "Total Points"},
     "soccer": {
-        "h2h": "獨贏 (Head to Head)",
-        "spreads": "讓分 (Handicap)",
-        "totals": "大小分 (Total Goals)",
-        "btts": "雙方都得分 (Both Teams to Score)",
+        "h2h": "Head to Head",
+        "spreads": "Handicap",
+        "totals": "Total Goals",
+        "btts": "Both Teams to Score",
     },
-    "hockey": {
-        "h2h": "獨贏 (Money Line)",
-        "spreads": "讓分 (Puck Line)",
-        "totals": "大小分 (Total Goals)",
-    },
+    "hockey": {"h2h": "Money Line", "spreads": "Puck Line", "totals": "Total Goals"},
     "tennis": {
-        "h2h": "獨贏 (Head to Head)",
-        "spreads": "讓分 (Game/Set Handicap)",
-        "totals": "大小分 (Total Match Games)",
+        "h2h": "Head to Head",
+        "spreads": "Game/Set Handicap",
+        "totals": "Total Match Games",
     },
 }
 
 # Fallback for a sport not in the table above (or "other").
 MARKET_LABELS = {
-    "h2h": "獨贏 (Head to Head)",
-    "spreads": "讓分 (Line / Handicap)",
-    "totals": "大小分 (Total Points / Total Runs — Over/Under)",
-    "btts": "雙方都得分 (Both Teams to Score)",
+    "h2h": "Head to Head",
+    "spreads": "Line / Handicap",
+    "totals": "Total Points / Total Runs (Over/Under)",
+    "btts": "Both Teams to Score",
 }
 
 
@@ -53,7 +44,7 @@ def market_label(bet) -> str:
     by_sport = MARKET_LABELS_BY_SPORT.get(bet.sport, {})
     label = by_sport.get(bet.market) or MARKET_LABELS.get(bet.market) or bet.market_description
     if bet.is_team_total:
-        label += " · 單隊得分(非全場)"
+        label += " (單隊得分,非全場)"
     return label
 
 
@@ -272,7 +263,7 @@ def _bet_block(bet, matched, bookmakers: list[dict]) -> tuple[str, list[tuple[st
         if countdown:
             lines.append(countdown)
     lines.append(f"👉 {rank_label(bet.rank)}：<b>{esc(_pick_description(bet))}</b>")
-    lines.append(f"📖 對應盤口：{esc(market_label(bet))}")
+    lines.append(f"📖 到 Sportsbet/PointsBet 找：<b>{esc(market_label(bet))}</b>")
 
     buttons: list[tuple[str, str]] = []
     if bet.odds_claimed:
