@@ -1,5 +1,4 @@
 import difflib
-from urllib.parse import quote_plus
 
 import requests
 
@@ -17,10 +16,6 @@ SPORT_GROUPS = {
 }
 
 _sports_cache: list[dict] | None = None
-
-
-def sportsbet_search_url(query: str) -> str:
-    return f"https://www.sportsbet.com.au/search?query={quote_plus(query)}"
 
 
 def _get(path: str, api_key: str, **params) -> requests.Response:

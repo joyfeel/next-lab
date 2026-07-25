@@ -4,6 +4,15 @@ import requests
 
 BOOKMAKER_NAMES = {"sportsbet": "Sportsbet", "pointsbetau": "PointsBet"}
 
+# Beginner-friendly label for each internal market key, with the bookmaker's
+# own terminology alongside so a first-time user can find the right tab.
+MARKET_LABELS = {
+    "h2h": "獨贏 (Head to Head)",
+    "spreads": "讓分 (Line / Handicap)",
+    "totals": "大小分 (Total Points / Total Runs — Over/Under)",
+    "btts": "雙方都得分 (Both Teams to Score)",
+}
+
 
 def esc(text: str | None) -> str:
     return html.escape(text or "", quote=False)
@@ -28,8 +37,31 @@ def send_message(
     resp.raise_for_status()
 
 
-def _market_lines(bet, bookmakers: list[dict]) -> tuple[list[str], list[tuple[str, str]]]:
-    """Current odds text per bookmaker + deep-link buttons."""
+def _pick_description(bet) -> str:
+    """Beginner-friendly rendering of 'what to bet', in plain language."""
+    sel = (bet.selection or "").strip()
+    if bet.market == "totals":
+        side = {"over": "大 (Over)", "under": "小 (Under)"}.get(sel.lower(), sel)
+        return f"{side} {bet.line or ''}".strip()
+    if bet.market == "spreads":
+        return f"{sel} {bet.line or ''}".strip()
+    if bet.market == "btts":
+        yn = {"yes": "是 (Yes)", "no": "否 (No)"}.get(sel.lower(), sel)
+        return f"雙方都進球：{yn}"
+    if bet.market == "h2h":
+        return f"獨贏 {sel}"
+    return f"{sel} {bet.line or ''}".strip()
+
+
+def _bookmaker_deep_link(bookmaker: dict) -> str | None:
+    """Event-level link. Sportsbet/PointsBet only expose this at the
+    bookmaker level, not per-market or per-outcome — in practice
+    market/outcome `link` is consistently null."""
+    return bookmaker.get("link")
+
+
+def _odds_lines(bet, bookmakers: list[dict]) -> tuple[list[str], list[tuple[str, str]]]:
+    """Current-odds text per bookmaker + deep-link buttons (event page)."""
     lines: list[str] = []
     buttons: list[tuple[str, str]] = []
     for bm in bookmakers:
@@ -45,54 +77,78 @@ def _market_lines(bet, bookmakers: list[dict]) -> tuple[list[str], list[tuple[st
                 + f" @ {o.get('price')}"
                 for o in market.get("outcomes", [])
             )
-            suffix = "" if shown == bet.market else f"(僅 {shown})"
+            suffix = "" if shown == bet.market else f"(僅提供 {shown})"
             lines.append(f"• {esc(name)} {suffix}: {esc(prices)}")
-        link = (
-            (market or {}).get("link")
-            or bm.get("link")
-            or next(
-                (
-                    o.get("link")
-                    for o in (market or {}).get("outcomes", [])
-                    if o.get("link")
-                ),
-                None,
-            )
-        )
+        link = _bookmaker_deep_link(bm)
         if link:
             buttons.append((f"開啟 {name}", link))
     return lines, buttons
 
 
-def format_bet_message(
-    author: str, title: str, article_url: str, extraction, bet, matched, bookmakers
-) -> tuple[str, list[tuple[str, str]]]:
-    from . import markets
+def _bet_block(bet, matched, bookmakers: list[dict]) -> tuple[str, list[tuple[str, str]]]:
+    matchup = " @ ".join(
+        x
+        for x in [
+            bet.away_team_en or bet.away_team_zh,
+            bet.home_team_en or bet.home_team_zh,
+        ]
+        if x
+    )
+    market_label = MARKET_LABELS.get(bet.market, bet.market_description)
 
+    lines: list[str] = []
+    if matchup:
+        lines.append(f"⚔️ <b>{esc(matchup)}</b>")
+    lines.append(f"👉 推薦：<b>{esc(_pick_description(bet))}</b>")
+    lines.append(f"📖 對應盤口：{esc(market_label)}")
+    if bet.odds_claimed:
+        lines.append(f"📰 文中賠率：{esc(bet.odds_claimed)}")
+
+    buttons: list[tuple[str, str]] = []
+    if matched and bookmakers:
+        odds_lines, link_buttons = _odds_lines(bet, bookmakers)
+        if odds_lines:
+            lines.append("💰 目前賠率：")
+            lines.extend(odds_lines)
+        # Disambiguate buttons when an article covers more than one match.
+        tag = (bet.home_team_en or bet.home_team_zh or "")[:8].strip()
+        buttons = [(f"{label} · {tag}" if tag else label, url) for label, url in link_buttons]
+    else:
+        lines.append("⚠️ Sportsbet / PointsBet 目前未開盤,暫無連結")
+
+    return "\n".join(lines), buttons
+
+
+def format_article_message(
+    author: str,
+    title: str,
+    article_url: str,
+    extraction,
+    bet_results: list[tuple],
+) -> tuple[str, list[tuple[str, str]]]:
+    """One Telegram message per article, covering every bet inside it.
+
+    bet_results: list of (bet, matched, bookmakers) — one entry per bet.
+    """
     parts = [
         f"🏟 <b>{esc(author)}</b> 新推薦",
         f"<b>{esc(title)}</b>",
         "",
         f"📋 {esc(extraction.summary)}",
-        "",
-        f"🎯 {esc(bet.market_description)}: <b>{esc(bet.selection)}</b>"
-        + (f" {esc(bet.line)}" if bet.line else "")
-        + (f"(文中賠率 {esc(bet.odds_claimed)})" if bet.odds_claimed else ""),
     ]
-    matchup = " @ ".join(
-        x for x in [bet.away_team_en or bet.away_team_zh, bet.home_team_en or bet.home_team_zh] if x
-    )
-    if matchup:
-        parts.append(f"⚔️ {esc(matchup)}")
 
-    buttons: list[tuple[str, str]] = [("PTT 原文", article_url)]
-    if matched and bookmakers:
-        lines, link_buttons = _market_lines(bet, bookmakers)
-        if lines:
-            parts += ["", "💰 目前賠率:"] + lines
-        buttons += link_buttons
-    else:
-        parts += ["", "⚠️ 未在 Sportsbet / PointsBet 找到對應賽事或市場"]
-    if matchup:
-        buttons.append(("Sportsbet 搜尋", markets.sportsbet_search_url(matchup.split(" @ ")[-1])))
+    buttons: list[tuple[str, str]] = []
+    seen_urls: set[str] = set()
+    for bet, matched, bookmakers in bet_results:
+        block, block_buttons = _bet_block(bet, matched, bookmakers)
+        parts += ["", "――――――――――", block]
+        for label, url in block_buttons:
+            # Same match, different bet -> same event-level deep link;
+            # skip the duplicate button rather than repeating it.
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+            buttons.append((label, url))
+
+    buttons.append(("PTT 原文", article_url))
     return "\n".join(parts), buttons

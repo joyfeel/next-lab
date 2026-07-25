@@ -27,6 +27,7 @@ def process_article(cfg: Config, author: str, entry: dict) -> None:
         print("  no actionable content, skipping")
         return
 
+    bet_results = []
     for bet in extraction.bets:
         matched = None
         bookmakers: list[dict] = []
@@ -39,14 +40,15 @@ def process_article(cfg: Config, author: str, entry: dict) -> None:
                     cfg.data_api_key, sport_key, event["id"], wanted
                 )
         except Exception:
-            print("  market lookup failed, delivering without market data")
+            print("  market lookup failed for one bet, continuing without market data")
             traceback.print_exc()
+        bet_results.append((bet, matched, bookmakers))
 
-        text, buttons = notify.format_bet_message(
-            author, entry["title"], entry["url"], extraction, bet, matched, bookmakers
-        )
-        notify.send_message(cfg.telegram_bot_token, cfg.telegram_chat_id, text, buttons)
-        print("  delivered")
+    text, buttons = notify.format_article_message(
+        author, entry["title"], entry["url"], extraction, bet_results
+    )
+    notify.send_message(cfg.telegram_bot_token, cfg.telegram_chat_id, text, buttons)
+    print("  delivered")
 
 
 def run() -> int:
