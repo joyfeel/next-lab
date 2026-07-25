@@ -37,7 +37,10 @@ def _similarity(a: str, b: str) -> float:
 
 
 def _event_score(bet, event: dict) -> float:
-    home, away = event.get("home_team", ""), event.get("away_team", "")
+    # `.get(key, default)` only falls back when the key is absent — some
+    # events (outrights, specials) carry the key with an explicit `null`,
+    # which `.get` still returns as None.
+    home, away = event.get("home_team") or "", event.get("away_team") or ""
     scores = []
     if bet.home_team_en:
         scores.append(_similarity(bet.home_team_en, home))
