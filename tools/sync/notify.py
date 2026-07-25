@@ -41,11 +41,18 @@ MARKET_LABELS = {
 
 
 def market_label(bet) -> str:
+    """The bookmaker's own English tab name — the piece of information the
+    Chinese pick description below doesn't already carry."""
     by_sport = MARKET_LABELS_BY_SPORT.get(bet.sport, {})
-    label = by_sport.get(bet.market) or MARKET_LABELS.get(bet.market) or bet.market_description
-    if bet.is_team_total:
-        label += " (單隊得分,非全場)"
-    return label
+    return by_sport.get(bet.market) or MARKET_LABELS.get(bet.market) or bet.market_description
+
+
+_MARKET_PHRASE = {
+    "h2h": "獨贏",
+    "spreads": "讓分",
+    "totals": "大小分",
+    "btts": "雙方都進球",
+}
 
 
 _RANK_LABELS = {1: "🥇 首選", 2: "🥈 次選", 3: "🥉 第三選擇"}
@@ -122,21 +129,28 @@ def _resolve_team_name(bet, english_name: str) -> str:
 
 
 def _pick_description(bet) -> str:
-    """Beginner-friendly rendering of 'what to bet', in plain language."""
+    """'{中文盤口} ({Sportsbet 英文分類})：{實際下法}' — one line covering both
+    what to bet and which tab to find it under, instead of stating the
+    market twice (once here, once in a separate line)."""
     sel = (bet.selection or "").strip()
+    market_zh = _MARKET_PHRASE.get(bet.market, bet.market_description)
+    prefix = f"{market_zh} ({market_label(bet)})："
+    if bet.is_team_total:
+        prefix = f"{market_zh} ({market_label(bet)} · 單隊得分)："
+
     if bet.market == "totals":
         side = {"over": "大 (Over)", "under": "小 (Under)"}.get(sel.lower(), sel)
-        return f"{side} {bet.line or ''}".strip()
+        return f"{prefix}{side} {bet.line or ''}".strip()
     if bet.market == "spreads":
-        return f"{_resolve_team_name(bet, sel)} {bet.line or ''}".strip()
+        return f"{prefix}{_resolve_team_name(bet, sel)} {bet.line or ''}".strip()
     if bet.market == "btts":
         yn = {"yes": "是 (Yes)", "no": "否 (No)"}.get(sel.lower(), sel)
-        return f"雙方都進球：{yn}"
+        return f"{prefix}{yn}"
     if bet.market == "h2h":
         if sel.lower() == "draw":
-            return "獨贏 和局 (Draw)"
-        return f"獨贏 {_resolve_team_name(bet, sel)}"
-    return f"{sel} {bet.line or ''}".strip()
+            return f"{prefix}和局 (Draw)"
+        return f"{prefix}{_resolve_team_name(bet, sel)}"
+    return f"{prefix}{sel} {bet.line or ''}".strip()
 
 
 def _bookmaker_deep_link(bookmaker: dict) -> str | None:
@@ -263,7 +277,6 @@ def _bet_block(bet, matched, bookmakers: list[dict]) -> tuple[str, list[tuple[st
         if countdown:
             lines.append(countdown)
     lines.append(f"👉 {rank_label(bet.rank)}：<b>{esc(_pick_description(bet))}</b>")
-    lines.append(f"📖 到 Sportsbet/PointsBet 找：<b>{esc(market_label(bet))}</b>")
 
     buttons: list[tuple[str, str]] = []
     if bet.odds_claimed:
