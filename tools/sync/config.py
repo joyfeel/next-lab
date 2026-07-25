@@ -23,7 +23,7 @@ class Config:
     gemini_api_key: str
     data_api_key: str
     telegram_bot_token: str
-    telegram_chat_id: str
+    telegram_chat_ids: list[str] = field(default_factory=list)
     authors: list[str] = field(default_factory=list)
 
     @classmethod
@@ -33,7 +33,13 @@ class Config:
             gemini_api_key=os.environ.get("GEMINI_API_KEY", ""),
             data_api_key=os.environ.get("DATA_API_KEY", ""),
             telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
-            telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", ""),
+            # Comma-separated: personal chat + any group chat_ids, e.g.
+            # "1257249563,-1001234567890"
+            telegram_chat_ids=[
+                c.strip()
+                for c in os.environ.get("TELEGRAM_CHAT_ID", "").split(",")
+                if c.strip()
+            ],
             authors=[
                 a.strip()
                 for a in os.environ.get("WATCH_AUTHORS", "lotterywin").split(",")
@@ -49,6 +55,6 @@ class Config:
             missing.append("DATA_API_KEY")
         if not self.telegram_bot_token:
             missing.append("TELEGRAM_BOT_TOKEN")
-        if not self.telegram_chat_id:
+        if not self.telegram_chat_ids:
             missing.append("TELEGRAM_CHAT_ID")
         return missing

@@ -1,5 +1,6 @@
 import difflib
 import html
+import traceback
 from datetime import datetime, timezone
 
 import requests
@@ -74,6 +75,23 @@ def send_message(
         f"https://api.telegram.org/bot{token}/sendMessage", json=payload, timeout=30
     )
     resp.raise_for_status()
+
+
+def broadcast(
+    token: str,
+    chat_ids: list[str],
+    text: str,
+    buttons: list[tuple[str, str]] | None = None,
+) -> None:
+    """Send to every configured recipient (personal chat, group chats, ...).
+    One recipient failing (e.g. bot removed from a group) shouldn't block
+    the rest."""
+    for chat_id in chat_ids:
+        try:
+            send_message(token, chat_id, text, buttons)
+        except requests.RequestException:
+            print(f"  failed to deliver to {chat_id}")
+            traceback.print_exc()
 
 
 def _team_bilingual(en: str | None, zh: str | None) -> str:

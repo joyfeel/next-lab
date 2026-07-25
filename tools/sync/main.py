@@ -27,7 +27,7 @@ def process_article(cfg: Config, author: str, entry: dict) -> None:
         text, buttons = notify.format_non_bet_message(
             author, entry["title"], entry["url"], extraction
         )
-        notify.send_message(cfg.telegram_bot_token, cfg.telegram_chat_id, text, buttons)
+        notify.broadcast(cfg.telegram_bot_token, cfg.telegram_chat_ids, text, buttons)
         print("  delivered (non-recommendation)")
         return
 
@@ -51,7 +51,7 @@ def process_article(cfg: Config, author: str, entry: dict) -> None:
     text, buttons = notify.format_article_message(
         author, entry["title"], entry["url"], extraction, bet_results
     )
-    notify.send_message(cfg.telegram_bot_token, cfg.telegram_chat_id, text, buttons)
+    notify.broadcast(cfg.telegram_bot_token, cfg.telegram_chat_ids, text, buttons)
     print("  delivered")
 
 
@@ -89,9 +89,9 @@ def run() -> int:
                 if attempts >= MAX_ATTEMPTS:
                     seen[key] = {"status": "failed"}
                     try:
-                        notify.send_message(
+                        notify.broadcast(
                             cfg.telegram_bot_token,
-                            cfg.telegram_chat_id,
+                            cfg.telegram_chat_ids,
                             f"⚠️ 處理文章失敗(已重試 {MAX_ATTEMPTS} 次):\n{entry['title']}\n{entry['url']}",
                         )
                     except Exception:
