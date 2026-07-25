@@ -1,4 +1,5 @@
 import difflib
+import time
 
 import requests
 
@@ -6,6 +7,12 @@ API_BASE = "https://api.the-odds-api.com/v4"
 BOOKMAKERS = "sportsbet,pointsbetau"
 MATCH_THRESHOLD = 0.62
 MAX_SPORTS_SCANNED = 30
+
+# Only retry failures that might actually clear on their own. A 422 (e.g.
+# "market not offered for this sport") or other 4xx is a property of the
+# request itself — retrying with identical params just gets the same error,
+# so those raise immediately for the caller to handle (see get_event_odds).
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
 SPORT_GROUPS = {
     "baseball": "Baseball",
@@ -20,9 +27,21 @@ _sports_cache: list[dict] | None = None
 
 def _get(path: str, api_key: str, **params) -> requests.Response:
     params["apiKey"] = api_key
-    resp = requests.get(f"{API_BASE}{path}", params=params, timeout=30)
-    resp.raise_for_status()
-    return resp
+    url = f"{API_BASE}{path}"
+    last_err: Exception | None = None
+    for attempt in range(3):
+        try:
+            resp = requests.get(url, params=params, timeout=30)
+            resp.raise_for_status()
+            return resp
+        except requests.HTTPError as err:
+            if err.response is not None and err.response.status_code not in _RETRYABLE_STATUS:
+                raise
+            last_err = err
+        except requests.RequestException as err:
+            last_err = err
+        time.sleep(2**attempt)
+    raise last_err
 
 
 def list_sports(api_key: str) -> list[dict]:

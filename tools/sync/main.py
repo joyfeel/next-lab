@@ -1,6 +1,7 @@
 import json
 import sys
 import traceback
+from datetime import datetime, timezone
 
 import requests
 
@@ -66,6 +67,26 @@ def process_article(cfg: Config, author: str, entry: dict) -> None:
     print("  delivered")
 
 
+def _maybe_send_heartbeat(cfg: Config, state: dict) -> None:
+    """Once per (UTC) day, confirm the system is alive — otherwise a quiet
+    day with no new posts looks identical to the pipeline being broken."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    if state.get("last_heartbeat_date") == today:
+        return
+    text = (
+        f"✅ 系統運作正常({today})\n"
+        f"追蹤作者：{', '.join(cfg.authors)}\n"
+        f"累計處理文章：{len(state.get('seen', {}))} 篇"
+    )
+    try:
+        notify.broadcast(cfg.telegram_bot_token, cfg.telegram_chat_ids, text)
+        state["last_heartbeat_date"] = today
+        print(f"heartbeat sent for {today}")
+    except Exception:
+        print("  heartbeat delivery failed")
+        traceback.print_exc()
+
+
 def run() -> int:
     cfg = Config.from_env()
     missing = cfg.missing_keys()
@@ -76,6 +97,8 @@ def run() -> int:
     state = load_state()
     seen = state["seen"]
     first_run = not seen
+
+    _maybe_send_heartbeat(cfg, state)
 
     for author in cfg.authors:
         entries = feed.search_author(author)
