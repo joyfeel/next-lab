@@ -9,6 +9,8 @@ from . import extract, feed, markets, notify
 from .config import STATE_FILE, Config
 
 MAX_ATTEMPTS = 3
+# Statuses that need no further work; anything else is retried next run.
+TERMINAL_STATUSES = ("notified", "seeded", "failed", "skipped")
 
 
 def load_state() -> dict:
@@ -22,8 +24,20 @@ def save_state(state: dict) -> None:
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n")
 
 
-def process_article(cfg: Config, author: str, entry: dict) -> None:
+def process_article(cfg: Config, author: str, entry: dict) -> bool:
+    """Deliver one article. Returns False if it wasn't the watched author's.
+
+    The mirror listing (used when the primary is unreachable) is a whole user
+    page, so it also matches other people's posts shown alongside — only the
+    article page itself states the real author, hence the check here rather
+    than in the listing.
+    """
     article = feed.fetch_article(entry["id"])
+    actual = article["author"]
+    if actual is not None and actual.lower() != author.lower():
+        print(f"  skipped: written by {actual}, not {author}")
+        return False
+
     extraction = extract.extract(entry["title"], article["body"], cfg.gemini_api_key)
 
     if extraction is None or not extraction.is_recommendation or not extraction.bets:
@@ -32,7 +46,7 @@ def process_article(cfg: Config, author: str, entry: dict) -> None:
         )
         notify.broadcast(cfg.telegram_bot_token, cfg.telegram_chat_ids, text, buttons)
         print("  delivered (non-recommendation)")
-        return
+        return True
 
     bet_results = []
     # Multiple bets in one article are often the same match (e.g. h2h +
@@ -65,6 +79,7 @@ def process_article(cfg: Config, author: str, entry: dict) -> None:
     )
     notify.broadcast(cfg.telegram_bot_token, cfg.telegram_chat_ids, text, buttons)
     print("  delivered")
+    return True
 
 
 def _maybe_send_heartbeat(cfg: Config, state: dict) -> None:
@@ -106,7 +121,7 @@ def run() -> int:
         for entry in entries:
             key = entry["id"]
             record = seen.get(key)
-            if record and record["status"] in ("notified", "seeded", "failed"):
+            if record and record["status"] in TERMINAL_STATUSES:
                 continue
 
             if first_run:
@@ -116,8 +131,8 @@ def run() -> int:
             attempts = (record or {}).get("attempts", 0) + 1
             try:
                 print(f"processing {key}")
-                process_article(cfg, author, entry)
-                seen[key] = {"status": "notified"}
+                delivered = process_article(cfg, author, entry)
+                seen[key] = {"status": "notified" if delivered else "skipped"}
             except Exception as err:
                 traceback.print_exc()
                 rate_limited = (
