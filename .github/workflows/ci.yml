@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  POLL_SECONDS: 90
+  POLL_SECONDS: 75
   # 5h40m, leaving headroom under timeout-minutes for the handoff step.
   LOOP_SECONDS: 20400
 
