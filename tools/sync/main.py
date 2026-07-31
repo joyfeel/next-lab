@@ -9,11 +9,15 @@ import requests
 from . import extract, feed, markets, notify
 from .config import STATE_FILE, Config
 
-MAX_ATTEMPTS = 3
+# Polling every 90s, so this is ~15 minutes of retrying before giving up on an
+# article — roughly the wall-clock budget the old 5-minute cadence allowed.
+MAX_ATTEMPTS = 10
 # Statuses that need no further work; anything else is retried next run.
 TERMINAL_STATUSES = ("notified", "seeded", "failed", "skipped")
 HEARTBEAT_TZ = ZoneInfo("Australia/Melbourne")
 HEARTBEAT_HOUR = 20
+# Consecutive empty scans before assuming the listing parser is broken.
+ZERO_SCAN_ALERT_AFTER = 10
 
 
 def load_state() -> dict:
@@ -99,11 +103,24 @@ def _maybe_send_heartbeat(cfg: Config, state: dict) -> None:
     today = now.date().isoformat()
     if state.get("last_heartbeat_local_date") == today:
         return
+
+    # Report what scanning actually returned. Claiming all-clear while the
+    # listing parser silently yields nothing is worse than sending nothing.
+    health = state.get("scan_health", {})
+    stalled = [
+        a for a, h in health.items() if h.get("zero_streak", 0) >= ZERO_SCAN_ALERT_AFTER
+    ]
+    scans = "、".join(
+        f"{a} {h.get('last_count', 0)} 篇" for a, h in health.items()
+    )
     text = (
-        f"✅ 系統運作正常({today})\n"
+        f"{'⚠️ 系統異常' if stalled else '✅ 系統運作正常'}({today})\n"
         f"追蹤作者：{', '.join(cfg.authors)}\n"
+        f"最近掃描：{scans or '尚無資料'}\n"
         f"累計處理文章：{len(state.get('seen', {}))} 篇"
     )
+    if stalled:
+        text += f"\n⚠️ 掃不到文章：{', '.join(stalled)}"
     try:
         notify.broadcast(cfg.telegram_bot_token, cfg.telegram_chat_ids, text)
         state["last_heartbeat_local_date"] = today
@@ -111,6 +128,89 @@ def _maybe_send_heartbeat(cfg: Config, state: dict) -> None:
     except Exception:
         print("  heartbeat delivery failed")
         traceback.print_exc()
+
+
+def _track_scan_health(cfg: Config, state: dict, author: str, count: int) -> None:
+    """Watch for a listing that parses to nothing.
+
+    An empty result is indistinguishable from a quiet day, so if PTT changes
+    its markup the pipeline goes silent while still looking healthy. Alert
+    once per outage, not once per poll.
+    """
+    record = state.setdefault("scan_health", {}).setdefault(
+        author, {"zero_streak": 0, "alerted": False, "last_count": 0}
+    )
+    if count > 0:
+        record.update(zero_streak=0, alerted=False, last_count=count)
+        return
+
+    record["zero_streak"] += 1
+    if record["zero_streak"] < ZERO_SCAN_ALERT_AFTER or record["alerted"]:
+        return
+    record["alerted"] = True
+    try:
+        notify.broadcast(
+            cfg.telegram_bot_token,
+            cfg.telegram_chat_ids,
+            f"⚠️ 已連續 {record['zero_streak']} 次掃不到 {author} 的任何文章\n"
+            f"(上次正常掃到 {record['last_count']} 篇)\n"
+            "PTT 可能已改版,文章列表解析失效",
+        )
+    except Exception:
+        # Un-latch so the next poll tries the alert again.
+        record["alerted"] = False
+        traceback.print_exc()
+
+
+def _scan_author(cfg: Config, state: dict, author: str, first_run: bool) -> None:
+    seen = state["seen"]
+    entries = feed.search_author(author)
+    print(f"scan: {len(entries)} items")
+    _track_scan_health(cfg, state, author, len(entries))
+
+    for entry in entries:
+        key = entry["id"]
+        record = seen.get(key)
+        if record and record["status"] in TERMINAL_STATUSES:
+            continue
+
+        if first_run:
+            seen[key] = {"status": "seeded"}
+            continue
+
+        attempts = (record or {}).get("attempts", 0) + 1
+        try:
+            print(f"processing {key}")
+            delivered = process_article(cfg, author, entry)
+            seen[key] = {"status": "notified" if delivered else "skipped"}
+        except Exception as err:
+            traceback.print_exc()
+            rate_limited = (
+                isinstance(err, requests.HTTPError)
+                and err.response is not None
+                and err.response.status_code == 429
+            )
+            if rate_limited:
+                # Every fallback model is exhausted right now. This
+                # isn't a bug — it clears on its own — so keep retrying
+                # every run without burning down attempts or alerting.
+                seen[key] = {"status": "pending", "attempts": 0}
+            elif attempts >= MAX_ATTEMPTS:
+                seen[key] = {"status": "failed"}
+                try:
+                    notify.broadcast(
+                        cfg.telegram_bot_token,
+                        cfg.telegram_chat_ids,
+                        f"⚠️ 處理文章失敗(已重試 {MAX_ATTEMPTS} 次):\n{entry['title']}\n{entry['url']}",
+                    )
+                except Exception:
+                    traceback.print_exc()
+            else:
+                seen[key] = {"status": "pending", "attempts": attempts}
+        # Persist per article: the poll loop restarts this process every 90s,
+        # and a crash between here and the end of the scan would otherwise
+        # replay every delivery made above.
+        save_state(state)
 
 
 def run() -> int:
@@ -121,57 +221,29 @@ def run() -> int:
         return 0
 
     state = load_state()
-    seen = state["seen"]
-    first_run = not seen
+    first_run = not state["seen"]
 
     _maybe_send_heartbeat(cfg, state)
+    # Before the scan, which may raise — otherwise a PTT outage re-sends the
+    # heartbeat on every poll.
+    save_state(state)
 
-    for author in cfg.authors:
-        entries = feed.search_author(author)
-        print(f"scan: {len(entries)} items")
-        for entry in entries:
-            key = entry["id"]
-            record = seen.get(key)
-            if record and record["status"] in TERMINAL_STATUSES:
-                continue
-
-            if first_run:
-                seen[key] = {"status": "seeded"}
-                continue
-
-            attempts = (record or {}).get("attempts", 0) + 1
+    try:
+        for author in cfg.authors:
             try:
-                print(f"processing {key}")
-                delivered = process_article(cfg, author, entry)
-                seen[key] = {"status": "notified" if delivered else "skipped"}
-            except Exception as err:
+                _scan_author(cfg, state, author, first_run)
+            except Exception:
+                # One author's listing failing shouldn't skip the others. Count
+                # it like an empty scan: unreachable and unparseable are the
+                # same outage as far as "am I still seeing posts" goes.
+                print(f"scan failed for {author}")
                 traceback.print_exc()
-                rate_limited = (
-                    isinstance(err, requests.HTTPError)
-                    and err.response is not None
-                    and err.response.status_code == 429
-                )
-                if rate_limited:
-                    # Every fallback model is exhausted right now. This
-                    # isn't a bug — it clears on its own — so keep retrying
-                    # every run without burning down attempts or alerting.
-                    seen[key] = {"status": "pending", "attempts": 0}
-                elif attempts >= MAX_ATTEMPTS:
-                    seen[key] = {"status": "failed"}
-                    try:
-                        notify.broadcast(
-                            cfg.telegram_bot_token,
-                            cfg.telegram_chat_ids,
-                            f"⚠️ 處理文章失敗(已重試 {MAX_ATTEMPTS} 次):\n{entry['title']}\n{entry['url']}",
-                        )
-                    except Exception:
-                        traceback.print_exc()
-                else:
-                    seen[key] = {"status": "pending", "attempts": attempts}
+                _track_scan_health(cfg, state, author, 0)
+    finally:
+        save_state(state)
 
     if first_run:
-        print(f"first run: seeded {len(seen)} existing items")
-    save_state(state)
+        print(f"first run: seeded {len(state['seen'])} existing items")
     return 0
 
 

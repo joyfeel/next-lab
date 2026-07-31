@@ -92,21 +92,34 @@ def send_message(
     resp.raise_for_status()
 
 
+class DeliveryError(RuntimeError):
+    """Not one configured recipient accepted the message."""
+
+
 def broadcast(
     token: str,
     chat_ids: list[str],
     text: str,
     buttons: list[tuple[str, str]] | None = None,
-) -> None:
+) -> int:
     """Send to every configured recipient (personal chat, group chats, ...).
-    One recipient failing (e.g. bot removed from a group) shouldn't block
-    the rest."""
+
+    One recipient failing (e.g. bot removed from a group) shouldn't block the
+    rest, so returns how many accepted it. But a total failure must not be
+    mistaken for delivery — the caller would record the article as notified
+    and never retry it — hence DeliveryError when nobody got it.
+    """
+    delivered = 0
     for chat_id in chat_ids:
         try:
             send_message(token, chat_id, text, buttons)
+            delivered += 1
         except requests.RequestException:
             print(f"  failed to deliver to {chat_id}")
             traceback.print_exc()
+    if chat_ids and not delivered:
+        raise DeliveryError(f"no recipient accepted the message ({len(chat_ids)} tried)")
+    return delivered
 
 
 def _team_bilingual(en: str | None, zh: str | None) -> str:
