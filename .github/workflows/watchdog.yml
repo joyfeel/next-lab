@@ -1,0 +1,38 @@
+name: watchdog
+
+# ci.yml sustains itself by dispatching a successor before it exits. This only
+# has to catch the case where that chain breaks (cancelled run, job timeout,
+# handoff failure), so an unreliable cron is fine here — it just needs to fire
+# eventually. Lives in its own workflow so it is outside ci.yml's concurrency
+# group and can observe a run that is currently executing.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  ensure-running:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Start sync if idle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          active=0
+          for status in in_progress queued waiting pending; do
+            n=$(gh api \
+              "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?status=$status&per_page=1" \
+              --jq '.total_count')
+            active=$(( active + n ))
+          done
+
+          if [ "$active" -gt 0 ]; then
+            echo "sync already active ($active run(s)), nothing to do"
+            exit 0
+          fi
+
+          echo "no active sync run — restarting the chain"
+          gh workflow run ci.yml --ref main

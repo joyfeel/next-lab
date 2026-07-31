@@ -1,22 +1,35 @@
 name: ci
 
+# GitHub's `schedule` trigger has no timeliness guarantee — a "*/5" cron was
+# measured firing 3 times in 6.5 hours. So instead of one short run per poll,
+# this is a single long-lived run that polls internally and hands off to a
+# successor before hitting the 6h job limit. watchdog.yml restarts the chain
+# if a run ever dies without handing off.
 on:
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: ci
   cancel-in-progress: false
 
+env:
+  POLL_SECONDS: 90
+  # 5h40m, leaving headroom under timeout-minutes for the handoff step.
+  LOOP_SECONDS: 20400
+
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history so the in-loop rebase onto origin/main works.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -26,21 +39,45 @@ jobs:
 
       - run: pip install -r tools/sync/requirements.txt
 
-      - name: Sync
+      - name: Poll
         env:
+          PYTHONUNBUFFERED: "1"
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           DATA_API_KEY: ${{ secrets.DATA_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python -m tools.sync.main
-
-      - name: Update cache
         run: |
-          if [ -n "$(git status --porcelain .cache/)" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add .cache/
-            git commit -m "chore: update cache [skip ci]"
-            git pull --rebase origin main
-            git push
-          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Push the state file if it moved. Never fatal: the workspace copy
+          # survives to the next iteration, so a failed push just retries.
+          sync_state() {
+            if [ -n "$(git status --porcelain .cache/)" ]; then
+              git add .cache/
+              git commit -q -m "chore: update cache [skip ci]"
+            fi
+            git fetch -q origin main || return 0
+            [ -z "$(git log origin/main..HEAD --oneline)" ] && return 0
+            if git rebase -q origin/main && git push -q origin HEAD:main; then
+              return 0
+            fi
+            git rebase --abort 2>/dev/null || true
+            echo "  state push failed; retrying next iteration"
+          }
+
+          deadline=$(( $(date +%s) + LOOP_SECONDS ))
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            echo "--- $(date -u +%H:%M:%S) UTC ---"
+            python -m tools.sync.main || echo "  iteration failed, continuing"
+            sync_state
+            sleep "$POLL_SECONDS"
+          done
+
+      # Hand off to the next run. workflow_dispatch is one of the two events
+      # GITHUB_TOKEN is still allowed to trigger, so the chain is self-sustaining.
+      - name: Hand off
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run ci.yml --ref main
