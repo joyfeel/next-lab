@@ -1,7 +1,8 @@
 import json
 import sys
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -11,6 +12,8 @@ from .config import STATE_FILE, Config
 MAX_ATTEMPTS = 3
 # Statuses that need no further work; anything else is retried next run.
 TERMINAL_STATUSES = ("notified", "seeded", "failed", "skipped")
+HEARTBEAT_TZ = ZoneInfo("Australia/Melbourne")
+HEARTBEAT_HOUR = 20
 
 
 def load_state() -> dict:
@@ -83,10 +86,18 @@ def process_article(cfg: Config, author: str, entry: dict) -> bool:
 
 
 def _maybe_send_heartbeat(cfg: Config, state: dict) -> None:
-    """Once per (UTC) day, confirm the system is alive — otherwise a quiet
-    day with no new posts looks identical to the pipeline being broken."""
-    today = datetime.now(timezone.utc).date().isoformat()
-    if state.get("last_heartbeat_date") == today:
+    """Once a day at 20:00 Melbourne time, confirm the system is alive —
+    otherwise a quiet day with no new posts looks identical to the pipeline
+    being broken.
+
+    Keyed on a separate state field from the old UTC-daily heartbeat so the
+    stale value can't suppress the first evening send.
+    """
+    now = datetime.now(HEARTBEAT_TZ)
+    if now.hour < HEARTBEAT_HOUR:
+        return
+    today = now.date().isoformat()
+    if state.get("last_heartbeat_local_date") == today:
         return
     text = (
         f"✅ 系統運作正常({today})\n"
@@ -95,7 +106,7 @@ def _maybe_send_heartbeat(cfg: Config, state: dict) -> None:
     )
     try:
         notify.broadcast(cfg.telegram_bot_token, cfg.telegram_chat_ids, text)
-        state["last_heartbeat_date"] = today
+        state["last_heartbeat_local_date"] = today
         print(f"heartbeat sent for {today}")
     except Exception:
         print("  heartbeat delivery failed")
