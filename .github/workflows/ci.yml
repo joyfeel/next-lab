@@ -2,9 +2,16 @@ name: ci
 
 # GitHub's `schedule` trigger has no timeliness guarantee — a "*/5" cron was
 # measured firing 3 times in 6.5 hours. So instead of one short run per poll,
-# this is a single long-lived run that polls internally and hands off to a
-# successor before hitting the 6h job limit. watchdog.yml restarts the chain
-# if a run ever dies without handing off.
+# this is a single long-lived run that polls internally and is succeeded by
+# another before hitting the 6h job limit.
+#
+# The successor is queued up front rather than dispatched on the way out. A
+# dying run cannot be relied on to execute one last command — a killed runner
+# or a hard job timeout would take the whole chain with it — but a run already
+# sitting pending in the concurrency group starts on its own the moment this
+# one stops, however it stops. The step at the end then re-queues, replacing
+# that standby with one built from current main; if that step never runs, the
+# standby is still there. watchdog.yml is the last resort if both are lost.
 on:
   workflow_dispatch:
 
@@ -18,7 +25,7 @@ concurrency:
 
 env:
   POLL_SECONDS: 75
-  # 5h40m, leaving headroom under timeout-minutes for the handoff step.
+  # 5h40m, leaving headroom under timeout-minutes for the closing step.
   LOOP_SECONDS: 20400
 
 jobs:
@@ -38,6 +45,15 @@ jobs:
           cache-dependency-path: tools/sync/requirements.txt
 
       - run: pip install -r tools/sync/requirements.txt
+
+      # Deliberately after setup rather than first: a run that dies during
+      # checkout or pip dies in seconds, and queueing a successor from there
+      # would spin the chain as fast as runners can start. Everything past
+      # this point is the 5h40m poll, which is what needs the safety net.
+      - name: Queue standby successor
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run ci.yml --ref main -R "$GITHUB_REPOSITORY"
 
       - name: Poll
         env:
@@ -70,14 +86,17 @@ jobs:
           while [ "$(date +%s)" -lt "$deadline" ]; do
             echo "--- $(date -u +%H:%M:%S) UTC ---"
             python -m tools.sync.main || echo "  iteration failed, continuing"
-            sync_state
+            # Never let a git hiccup end the step early — that would cut the
+            # poll window short and start the next link in the chain.
+            sync_state || true
             sleep "$POLL_SECONDS"
           done
 
-      # Hand off to the next run. workflow_dispatch is one of the two events
-      # GITHUB_TOKEN is still allowed to trigger, so the chain is self-sustaining.
-      - name: Hand off
+      # Replace the standby with a run built from current main, so a code fix
+      # lands on the next link instead of the one after it. Superseding the
+      # pending run is exactly what the concurrency group does for us.
+      - name: Refresh successor
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run ci.yml --ref main
+        run: gh workflow run ci.yml --ref main -R "$GITHUB_REPOSITORY"
