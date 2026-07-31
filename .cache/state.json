@@ -91,5 +91,12 @@
       "status": "notified"
     }
   },
-  "last_heartbeat_date": "2026-07-31"
+  "last_heartbeat_date": "2026-07-31",
+  "scan_health": {
+    "lotterywin": {
+      "zero_streak": 0,
+      "alerted": false,
+      "last_count": 20
+    }
+  }
 }
