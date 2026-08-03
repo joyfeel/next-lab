@@ -185,14 +185,15 @@ def _scan_author(cfg: Config, state: dict, author: str, first_run: bool) -> None
             seen[key] = {"status": "notified" if delivered else "skipped"}
         except Exception as err:
             traceback.print_exc()
-            rate_limited = (
+            upstream_busy = (
                 isinstance(err, requests.HTTPError)
                 and err.response is not None
-                and err.response.status_code == 429
+                and err.response.status_code in (429, 500, 502, 503, 504)
             )
-            if rate_limited:
-                # Every fallback model is exhausted right now. This
-                # isn't a bug — it clears on its own — so keep retrying
+            if upstream_busy:
+                # Quota exhausted across every fallback model, or the
+                # provider is briefly down (Gemini 503s do happen). Neither
+                # is a bug — they clear on their own — so keep retrying
                 # every run without burning down attempts or alerting.
                 seen[key] = {"status": "pending", "attempts": 0}
             elif attempts >= MAX_ATTEMPTS:
