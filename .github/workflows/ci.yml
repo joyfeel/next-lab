@@ -65,21 +65,33 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          remote_state="$(mktemp)"
+          merged_state="$(mktemp)"
 
-          # Push the state file if it moved. Never fatal: the workspace copy
-          # survives to the next iteration, so a failed push just retries.
+          # This run may have sat pending for hours while the run it replaces
+          # kept recording deliveries. Start from what that run left behind,
+          # not from the snapshot taken when this one was queued.
+          git fetch -q origin main && git reset -q --hard origin/main
+
+          # Land the state file on top of origin/main. Never rebase: two edits
+          # to this one file conflict, and a conflict that latches strands the
+          # state locally until the next run replays every delivery in it.
+          # Folding the remote in first makes the write a union, so it can
+          # neither conflict nor drop a record. The hard reset also picks up
+          # any code pushed since this run started.
           sync_state() {
-            if [ -n "$(git status --porcelain .cache/)" ]; then
-              git add .cache/
-              git commit -q -m "chore: update cache [skip ci]"
-            fi
             git fetch -q origin main || return 0
-            [ -z "$(git log origin/main..HEAD --oneline)" ] && return 0
-            if git rebase -q origin/main && git push -q origin HEAD:main; then
-              return 0
-            fi
-            git rebase --abort 2>/dev/null || true
-            echo "  state push failed; retrying next iteration"
+            git show origin/main:.cache/state.json > "$remote_state" 2>/dev/null \
+              || : > "$remote_state"
+            python -m tools.sync.merge_state "$remote_state" || return 0
+            cp .cache/state.json "$merged_state"
+            git reset -q --hard origin/main
+            cp "$merged_state" .cache/state.json
+            [ -z "$(git status --porcelain .cache/)" ] && return 0
+            git add .cache/
+            git commit -q -m "chore: update cache [skip ci]"
+            git push -q origin HEAD:main \
+              || echo "  state push failed; retrying next iteration"
           }
 
           deadline=$(( $(date +%s) + LOOP_SECONDS ))
