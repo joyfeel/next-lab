@@ -35,4 +35,6 @@ jobs:
           fi
 
           echo "no active sync run — restarting the chain"
-          gh workflow run ci.yml --ref main
+          # -R is required: this job has no checkout, so gh has no repo to
+          # infer from and the dispatch fails with "not a git repository".
+          gh workflow run ci.yml --ref main -R "$GITHUB_REPOSITORY"

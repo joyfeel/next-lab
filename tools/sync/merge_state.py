@@ -42,12 +42,23 @@ def _merge_record(mine: dict | None, theirs: dict | None) -> dict:
     return merged
 
 
+def _posted_at(article_id: str) -> int:
+    try:
+        return int(article_id.split(".")[1])
+    except (IndexError, ValueError):
+        return 0
+
+
 def merge(mine: dict, theirs: dict) -> dict:
     merged = dict(mine)
     seen_mine, seen_theirs = mine.get("seen", {}), theirs.get("seen", {})
+    # Sorted, not set-iteration order: this file is rewritten on every poll and
+    # committed when it differs, and Python randomises string hashing per
+    # process, so an unordered union reshuffles every key each time and lands a
+    # full-file commit every 77 seconds.
+    keys = sorted(seen_mine.keys() | seen_theirs.keys(), key=lambda k: (_posted_at(k), k))
     merged["seen"] = {
-        key: _merge_record(seen_mine.get(key), seen_theirs.get(key))
-        for key in seen_mine.keys() | seen_theirs.keys()
+        key: _merge_record(seen_mine.get(key), seen_theirs.get(key)) for key in keys
     }
     # Heartbeat markers are dates, so the later one is the one that happened;
     # taking the earlier would send a second heartbeat for the same day.
