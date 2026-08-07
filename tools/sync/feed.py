@@ -139,12 +139,28 @@ def search_author(author: str) -> list[dict]:
 
     The primary host intermittently resets connections from datacenter IPs,
     so fall back to the mirror (same article IDs) when it's unreachable.
+
+    An empty board listing is treated the same as unreachable. A PTT layout
+    change to the board index returns HTTP 200 but parses to no rows, so the
+    network-error check alone would let a markup change blind us silently
+    (the reported failure mode). The mirror reads the author's own page
+    through a separate parser, so cross-check it before reporting nothing:
+    it also recovers a low-frequency poster who has simply scrolled off the
+    shallow index window. Only when both sources come back empty is the scan
+    genuinely empty, which is what the health check must then see.
     """
     try:
-        return _from_board_index(author)
+        rows = _from_board_index(author)
     except requests.RequestException:
         print("primary unreachable, using mirror")
         return _from_mirror(author)
+    if rows:
+        return rows
+    print("primary listing parsed no rows, cross-checking mirror")
+    try:
+        return _from_mirror(author) or rows
+    except requests.RequestException:
+        return rows
 
 
 def fetch_article(article_id: str) -> dict:
