@@ -22,21 +22,32 @@ INDEX_PAGES = 2
 
 # Each listing row is one `r-ent` block holding the title link and, further
 # down, the poster. Deleted posts keep the block but lose the link.
-_ROW_MARKER = '<div class="r-ent">'
-_ROW_LINK_RE = re.compile(
-    r'<a href="/bbs/' + BOARD + r'/(?P<id>M\.\d+\.A\.[0-9A-F]+)\.html">'
-    r"(?P<title>[^<]*)</a>"
+#
+# These patterns match by structure, not by an exact attribute string, so the
+# common shapes of a PTT layout change don't blind the parser: the class match
+# tolerates extra classes and either quote style, tag matches tolerate added
+# attributes and whitespace, and the article-id hex is case-insensitive. A
+# wholesale restructure would still need the mirror fallback in search_author.
+_ROW_MARKER_RE = re.compile(
+    r"""<div\b[^>]*\bclass=["'][^"']*(?<![\w-])r-ent(?![\w-])[^"']*["'][^>]*>"""
 )
-_ROW_AUTHOR_RE = re.compile(r'<div class="author">(?P<author>[^<]*)</div>')
+_ROW_LINK_RE = re.compile(
+    r'<a\b[^>]*\bhref="/bbs/' + BOARD + r'/(?P<id>M\.\d+\.A\.[0-9A-Fa-f]+)\.html"'
+    r"[^>]*>(?P<title>[^<]*)</a>"
+)
+_ROW_AUTHOR_RE = re.compile(
+    r"""<div\b[^>]*\bclass=["'][^"']*(?<![\w-])author(?![\w-])[^"']*["'][^>]*>"""
+    r"(?P<author>[^<]*)</div>"
+)
 _PREV_PAGE_RE = re.compile(
-    r'href="(?P<path>/bbs/' + BOARD + r'/index\d+\.html)">&lsaquo;'
+    r'href="(?P<path>/bbs/' + BOARD + r'/index\d+\.html)"[^>]*>\s*&lsaquo;'
 )
 _BODY_RE = re.compile(
     r'<div id="main-content"[^>]*>(?P<body>.*?)<span class="f2">', re.S
 )
 _MIRROR_ENTRY_RE = re.compile(
-    r'<a href="/bbs/' + BOARD + r'/(?P<id>M\.\d+\.A\.[0-9A-F]+)"[^>]*>\s*'
-    r'<span class="thread-title"[^>]*>(?P<title>[^<]+)</span>',
+    r'<a\b[^>]*\bhref="/bbs/' + BOARD + r'/(?P<id>M\.\d+\.A\.[0-9A-Fa-f]+)"[^>]*>\s*'
+    r'<span[^>]*\bclass="[^"]*\bthread-title\b[^"]*"[^>]*>(?P<title>[^<]+)</span>',
     re.S,
 )
 _MIRROR_BODY_RE = re.compile(
@@ -79,7 +90,7 @@ def _posted_at(article_id: str) -> int:
 def _rows_for_author(page: str, author: str) -> list[dict]:
     """Listing rows on one board page written by `author`."""
     rows = []
-    for block in page.split(_ROW_MARKER)[1:]:
+    for block in _ROW_MARKER_RE.split(page)[1:]:
         who = _ROW_AUTHOR_RE.search(block)
         if not who or who.group("author").strip().lower() != author.lower():
             continue
