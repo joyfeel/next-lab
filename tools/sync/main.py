@@ -108,7 +108,9 @@ def _maybe_send_heartbeat(cfg: Config, state: dict) -> None:
     # listing parser silently yields nothing is worse than sending nothing.
     health = state.get("scan_health", {})
     stalled = [
-        a for a, h in health.items() if h.get("zero_streak", 0) >= ZERO_SCAN_ALERT_AFTER
+        a
+        for a, h in health.items()
+        if h.get("zero_streak", 0) >= ZERO_SCAN_ALERT_AFTER or h.get("parser_alerted")
     ]
     scans = "、".join(
         f"{a} {h.get('last_count', 0)} 篇" for a, h in health.items()
@@ -130,16 +132,49 @@ def _maybe_send_heartbeat(cfg: Config, state: dict) -> None:
         traceback.print_exc()
 
 
-def _track_scan_health(cfg: Config, state: dict, author: str, count: int) -> None:
+def _track_scan_health(cfg: Config, state: dict, author: str, scan: "feed.Scan") -> None:
     """Watch for a listing that parses to nothing.
 
-    An empty result is indistinguishable from a quiet day, so if PTT changes
-    its markup the pipeline goes silent while still looking healthy. Alert
-    once per outage, not once per poll.
+    Two independent alerts:
+
+    * canary — the board page loaded but parsed to zero rows for anyone
+      (scan.primary_broken). A live board always shows other people's posts,
+      so that is a markup change: alert on the first occurrence rather than
+      waiting out the zero-streak, and say so even when a fallback source
+      still delivered, because the primary is silently degrading.
+    * blackout — every source came back empty for a sustained run of polls.
+      An empty result alone is indistinguishable from a quiet day, so this
+      one waits ZERO_SCAN_ALERT_AFTER polls. Alert once per outage.
     """
+    count = len(scan.articles)
     record = state.setdefault("scan_health", {}).setdefault(
-        author, {"zero_streak": 0, "alerted": False, "last_count": 0}
+        author,
+        {"zero_streak": 0, "alerted": False, "last_count": 0, "parser_alerted": False},
     )
+
+    if scan.primary_broken:
+        if not record.get("parser_alerted"):
+            if count > 0:
+                msg = (
+                    "⚠️ PTT 主站列表解析失效(canary)\n"
+                    f"主站板面掃不到任何文章,已自動改用備援來源({scan.source})"
+                    f"送出 {count} 篇。\nPTT 板面可能已改版,請盡快修復主站解析。"
+                )
+            else:
+                msg = (
+                    "⚠️ PTT 主站列表解析失效(canary)\n"
+                    "主站板面掃不到任何文章,且所有備援來源也都掃不到。\n"
+                    "PTT 可能已改版,文章列表解析失效。"
+                )
+            try:
+                notify.broadcast(cfg.telegram_bot_token, cfg.telegram_chat_ids, msg)
+                record["parser_alerted"] = True
+            except Exception:
+                traceback.print_exc()
+    elif count > 0:
+        # Primary healthy again — re-arm the canary for the next change.
+        record["parser_alerted"] = False
+
     if count > 0:
         record.update(zero_streak=0, alerted=False, last_count=count)
         return
@@ -164,9 +199,10 @@ def _track_scan_health(cfg: Config, state: dict, author: str, count: int) -> Non
 
 def _scan_author(cfg: Config, state: dict, author: str, first_run: bool) -> None:
     seen = state["seen"]
-    entries = feed.search_author(author)
-    print(f"scan: {len(entries)} items")
-    _track_scan_health(cfg, state, author, len(entries))
+    scan = feed.search_author(author)
+    entries = scan.articles
+    print(f"scan: {len(entries)} items (source={scan.source})")
+    _track_scan_health(cfg, state, author, scan)
 
     for entry in entries:
         key = entry["id"]
@@ -239,7 +275,7 @@ def run() -> int:
                 # same outage as far as "am I still seeing posts" goes.
                 print(f"scan failed for {author}")
                 traceback.print_exc()
-                _track_scan_health(cfg, state, author, 0)
+                _track_scan_health(cfg, state, author, feed.Scan([], "error", False))
     finally:
         save_state(state)
 
