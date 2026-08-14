@@ -221,6 +221,10 @@
     },
     "M.1786644779.A.BF8": {
       "status": "notified"
+    },
+    "M.1786674289.A.F99": {
+      "status": "pending",
+      "attempts": 0
     }
   },
   "last_heartbeat_date": "2026-07-31",
@@ -228,7 +232,7 @@
     "lotterywin": {
       "zero_streak": 0,
       "alerted": false,
-      "last_count": 2,
+      "last_count": 3,
       "parser_alerted": false
     }
   },
