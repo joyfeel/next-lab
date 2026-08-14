@@ -229,6 +229,9 @@
       "status": "notified"
     },
     "M.1786732796.A.E8F": {
+      "status": "notified"
+    },
+    "M.1786733107.A.550": {
       "status": "pending",
       "attempts": 0
     }
@@ -238,7 +241,7 @@
     "lotterywin": {
       "zero_streak": 0,
       "alerted": false,
-      "last_count": 3,
+      "last_count": 4,
       "parser_alerted": false
     }
   },
