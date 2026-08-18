@@ -275,6 +275,9 @@
     },
     "M.1786958863.A.0F1": {
       "status": "notified"
+    },
+    "M.1787014526.A.443": {
+      "status": "notified"
     }
   },
   "last_heartbeat_date": "2026-07-31",
@@ -282,7 +285,7 @@
     "lotterywin": {
       "zero_streak": 0,
       "alerted": false,
-      "last_count": 4,
+      "last_count": 2,
       "parser_alerted": false
     }
   },
