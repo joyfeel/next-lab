@@ -324,7 +324,7 @@
     "lotterywin": {
       "zero_streak": 0,
       "alerted": false,
-      "last_count": 6,
+      "last_count": 4,
       "parser_alerted": false
     }
   },
