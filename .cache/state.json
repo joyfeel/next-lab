@@ -320,6 +320,9 @@
     },
     "M.1787213407.A.31F": {
       "status": "notified"
+    },
+    "M.1787305661.A.357": {
+      "status": "notified"
     }
   },
   "last_heartbeat_date": "2026-07-31",
@@ -327,7 +330,7 @@
     "lotterywin": {
       "zero_streak": 0,
       "alerted": false,
-      "last_count": 1,
+      "last_count": 2,
       "parser_alerted": false
     }
   },
