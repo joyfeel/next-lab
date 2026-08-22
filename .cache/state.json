@@ -360,7 +360,7 @@
     "lotterywin": {
       "zero_streak": 0,
       "alerted": false,
-      "last_count": 4,
+      "last_count": 2,
       "parser_alerted": false
     }
   },
