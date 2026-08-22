@@ -329,6 +329,21 @@
     },
     "M.1787329489.A.04B": {
       "status": "notified"
+    },
+    "M.1787358253.A.639": {
+      "status": "skipped"
+    },
+    "M.1787375045.A.571": {
+      "status": "skipped"
+    },
+    "M.1787376629.A.6CB": {
+      "status": "skipped"
+    },
+    "M.1787388143.A.670": {
+      "status": "skipped"
+    },
+    "M.1787396448.A.D9C": {
+      "status": "skipped"
     }
   },
   "last_heartbeat_date": "2026-07-31",
@@ -336,7 +351,7 @@
     "lotterywin": {
       "zero_streak": 0,
       "alerted": false,
-      "last_count": 2,
+      "last_count": 25,
       "parser_alerted": false
     }
   },
