@@ -500,6 +500,10 @@
     },
     "M.1788175797.A.CA8": {
       "status": "skipped"
+    },
+    "M.1788192037.A.A41": {
+      "status": "pending",
+      "attempts": 0
     }
   },
   "last_heartbeat_date": "2026-07-31",
@@ -507,7 +511,7 @@
     "lotterywin": {
       "zero_streak": 0,
       "alerted": false,
-      "last_count": 25,
+      "last_count": 1,
       "parser_alerted": false
     }
   },
