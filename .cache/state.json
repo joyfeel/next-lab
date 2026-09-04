@@ -557,6 +557,10 @@
     },
     "M.1788527932.A.232": {
       "status": "notified"
+    },
+    "M.1788537742.A.2BE": {
+      "status": "pending",
+      "attempts": 0
     }
   },
   "last_heartbeat_date": "2026-07-31",
@@ -564,7 +568,7 @@
     "lotterywin": {
       "zero_streak": 0,
       "alerted": false,
-      "last_count": 1,
+      "last_count": 2,
       "parser_alerted": false
     }
   },
