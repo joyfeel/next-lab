@@ -613,8 +613,7 @@
       "status": "notified"
     },
     "M.1788716136.A.35C": {
-      "status": "pending",
-      "attempts": 0
+      "status": "notified"
     }
   },
   "last_heartbeat_date": "2026-07-31",
