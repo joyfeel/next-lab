@@ -683,6 +683,9 @@
     },
     "M.1789126278.A.56D": {
       "status": "skipped"
+    },
+    "M.1789133956.A.397": {
+      "status": "notified"
     }
   },
   "last_heartbeat_date": "2026-07-31",
@@ -690,7 +693,7 @@
     "lotterywin": {
       "zero_streak": 0,
       "alerted": false,
-      "last_count": 23,
+      "last_count": 1,
       "parser_alerted": false
     }
   },
