@@ -672,8 +672,17 @@
     "M.1789045952.A.BC0": {
       "status": "notified"
     },
+    "M.1789056948.A.5A1": {
+      "status": "skipped"
+    },
     "M.1789057995.A.2AD": {
       "status": "notified"
+    },
+    "M.1789119903.A.138": {
+      "status": "skipped"
+    },
+    "M.1789126278.A.56D": {
+      "status": "skipped"
     }
   },
   "last_heartbeat_date": "2026-07-31",
@@ -681,7 +690,7 @@
     "lotterywin": {
       "zero_streak": 0,
       "alerted": false,
-      "last_count": 4,
+      "last_count": 23,
       "parser_alerted": false
     }
   },
