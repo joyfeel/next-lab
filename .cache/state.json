@@ -700,8 +700,7 @@
       "status": "skipped"
     },
     "M.1789217743.A.56F": {
-      "status": "pending",
-      "attempts": 0
+      "status": "notified"
     }
   },
   "last_heartbeat_date": "2026-07-31",
