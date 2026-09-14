@@ -742,8 +742,7 @@
       "status": "notified"
     },
     "M.1789368011.A.84E": {
-      "status": "pending",
-      "attempts": 0
+      "status": "notified"
     }
   },
   "last_heartbeat_date": "2026-07-31",
