@@ -765,9 +765,14 @@
     "M.1789554418.A.663": {
       "status": "skipped"
     },
+    "M.1789559838.A.D18": {
+      "status": "skipped"
+    },
     "M.1789569548.A.F41": {
-      "status": "pending",
-      "attempts": 0
+      "status": "notified"
+    },
+    "M.1789573043.A.263": {
+      "status": "skipped"
     },
     "M.1789573178.A.E78": {
       "status": "notified"
@@ -778,7 +783,7 @@
     "lotterywin": {
       "zero_streak": 0,
       "alerted": false,
-      "last_count": 10,
+      "last_count": 9,
       "parser_alerted": false
     }
   },
