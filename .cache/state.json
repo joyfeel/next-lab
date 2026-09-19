@@ -818,6 +818,10 @@
     },
     "M.1789822204.A.EF7": {
       "status": "notified"
+    },
+    "M.1789825878.A.B47": {
+      "status": "pending",
+      "attempts": 0
     }
   },
   "last_heartbeat_date": "2026-07-31",
