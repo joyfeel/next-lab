@@ -850,8 +850,7 @@
       "status": "skipped"
     },
     "M.1789879981.A.AB5": {
-      "status": "pending",
-      "attempts": 0
+      "status": "notified"
     }
   },
   "last_heartbeat_date": "2026-07-31",
