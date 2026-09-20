@@ -855,6 +855,9 @@
     "M.1789879981.A.AB5": {
       "status": "notified"
     },
+    "M.1789900588.A.DB5": {
+      "status": "skipped"
+    },
     "M.1789905110.A.9DA": {
       "status": "notified"
     }
@@ -864,7 +867,7 @@
     "lotterywin": {
       "zero_streak": 0,
       "alerted": false,
-      "last_count": 8,
+      "last_count": 9,
       "parser_alerted": false
     }
   },
