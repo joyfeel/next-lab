@@ -123,6 +123,11 @@ def _maybe_send_heartbeat(cfg: Config, state: dict) -> None:
     )
     if stalled:
         text += f"\n⚠️ 掃不到文章：{', '.join(stalled)}"
+        for a in stalled:
+            d = health.get(a, {}).get("last_diag") or {}
+            if d:
+                lines = "\n".join(f"· {k}: {v}" for k, v in d.items())
+                text += f"\n\n{a} 各來源狀態:\n{lines}"
     try:
         notify.broadcast(cfg.telegram_bot_token, cfg.telegram_chat_ids, text)
         state["last_heartbeat_local_date"] = today
@@ -152,6 +157,11 @@ def _track_scan_health(cfg: Config, state: dict, author: str, scan: "feed.Scan")
         author,
         {"zero_streak": 0, "alerted": False, "last_count": 0, "parser_alerted": False},
     )
+    # Persist the per-source outcome every poll so the committed state file is a
+    # diagnostic window: when a scan yields nothing, state.json itself says which
+    # leg failed (unreachable host / stale search / mirror parsed-to-nothing),
+    # without needing CI log access.
+    record["last_diag"] = dict(scan.diagnostics)
 
     if scan.primary_broken:
         if not record.get("parser_alerted"):
