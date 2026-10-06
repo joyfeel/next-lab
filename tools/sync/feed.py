@@ -89,6 +89,16 @@ def _get(url: str, **kwargs) -> requests.Response:
     raise last_err
 
 
+def _err_label(err: Exception) -> str:
+    """A compact, actionable cause for diagnostics: the HTTP status when the
+    host answered (403 = IP blocked, 429 = rate-limited, 404 = URL gone), else
+    the exception type (ConnectionError, Timeout, ...)."""
+    resp = getattr(err, "response", None)
+    if resp is not None:
+        return f"HTTP {resp.status_code}"
+    return type(err).__name__
+
+
 def article_url(article_id: str) -> str:
     return f"{BASE_URL}/bbs/{BOARD}/{article_id}.html"
 
@@ -287,7 +297,7 @@ def search_author(author: str) -> Scan:
         if rows:
             return Scan(rows, "board", primary_broken, diag)
     except requests.RequestException as err:
-        diag["board"] = f"unreachable ({type(err).__name__})"
+        diag["board"] = f"unreachable ({_err_label(err)})"
         print("primary board index unreachable")
 
     merged: dict[str, dict] = {}
@@ -301,7 +311,7 @@ def search_author(author: str) -> Scan:
         for a in found:
             merged.setdefault(a["id"], a)
     except requests.RequestException as err:
-        diag["search"] = f"unreachable ({type(err).__name__})"
+        diag["search"] = f"unreachable ({_err_label(err)})"
         print("search source unreachable")
 
     try:
@@ -316,7 +326,7 @@ def search_author(author: str) -> Scan:
         for a in found:
             merged.setdefault(a["id"], a)
     except requests.RequestException as err:
-        diag["mirror"] = f"unreachable ({type(err).__name__})"
+        diag["mirror"] = f"unreachable ({_err_label(err)})"
         print("mirror source unreachable")
 
     ordered = sorted(merged.values(), key=lambda a: _posted_at(a["id"]), reverse=True)
