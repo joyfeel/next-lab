@@ -1,4 +1,5 @@
 import html
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -10,13 +11,28 @@ BASE_URL = "https://www.ptt.cc"
 MIRROR_URL = "https://www.pttweb.cc"
 BOARD = "SportLottery"
 BOARD_LOWER = BOARD.lower()
+# Both hosts began answering the CI runner's datacenter IP with 403 / Cloudflare
+# 530. A fuller, browser-like header set gets past a WAF rule that only checks
+# for a real Accept-Language etc.; it cannot get past a hard ASN/IP block, for
+# which SCRAPE_PROXY (an https proxy on a non-datacenter IP) is the real lever.
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
-    )
+    ),
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "image/avif,image/webp,*/*;q=0.8"
+    ),
+    "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
 }
 COOKIES = {"over18": "1"}
+
+# Optional egress proxy for when the runner's own IP is blocked. Set the
+# SCRAPE_PROXY secret to an https proxy URL on a residential/un-blocked IP;
+# unset, requests go out directly exactly as before.
+_PROXY = os.environ.get("SCRAPE_PROXY") or ""
+_PROXIES = {"http": _PROXY, "https": _PROXY} if _PROXY else None
 
 # How many board pages to read per scan. One page is ~20 posts, which on this
 # board is well over an hour — ample at a 75s poll. The second is only there so
@@ -79,7 +95,8 @@ def _get(url: str, **kwargs) -> requests.Response:
     for attempt in range(3):
         try:
             resp = requests.get(
-                url, headers=HEADERS, cookies=COOKIES, timeout=30, **kwargs
+                url, headers=HEADERS, cookies=COOKIES, timeout=30,
+                proxies=_PROXIES, **kwargs
             )
             resp.raise_for_status()
             return resp
