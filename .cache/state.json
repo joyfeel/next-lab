@@ -1060,7 +1060,7 @@
   "last_heartbeat_date": "2026-07-31",
   "scan_health": {
     "lotterywin": {
-      "zero_streak": 352,
+      "zero_streak": 353,
       "alerted": true,
       "last_count": 9,
       "parser_alerted": false,
