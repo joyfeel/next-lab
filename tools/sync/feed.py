@@ -1,7 +1,7 @@
 import html
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import requests
 from bs4 import BeautifulSoup
@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 BASE_URL = "https://www.ptt.cc"
 MIRROR_URL = "https://www.pttweb.cc"
 BOARD = "SportLottery"
+BOARD_LOWER = BOARD.lower()
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -62,11 +63,15 @@ class Scan:
         with fallbacks combined (e.g. "search+mirror"), or "none".
     primary_broken: the board page loaded but parsed to zero rows for anyone,
         i.e. the board-listing markup changed. A canary read by main.py.
+    diagnostics: per-source outcome, e.g. {"board": "unreachable (ConnectionError)",
+        "mirror": "0 rows"}. Surfaced in logs and alerts so a blackout names the
+        failing leg instead of a generic "found nothing".
     """
 
     articles: list[dict]
     source: str
     primary_broken: bool
+    diagnostics: dict = field(default_factory=dict)
 
 
 def _get(url: str, **kwargs) -> requests.Response:
@@ -184,31 +189,70 @@ def _from_search(author: str) -> list[dict]:
     return sorted(articles.values(), key=lambda a: _posted_at(a["id"]), reverse=True)
 
 
-def _from_mirror(author: str) -> list[dict]:
-    """Whole-user page on the mirror — a different host and markup, so it
-    survives a primary outage and a primary layout change alike. It also lists
-    posts by other people shown alongside, which fetch_article's author check
-    filters out.
+def _mirror_urls(author: str) -> list[str]:
+    """Mirror URLs to try, best first.
+
+    pttweb's bare /user/<name> is now a profile *overview* that no longer lists
+    article links; the board-scoped article view is where they live. Fall back
+    through the all-boards article view to the legacy bare URL, so the worst
+    case is exactly the pre-change behaviour.
     """
-    resp = _get(f"{MIRROR_URL}/user/{author}")
-    soup = BeautifulSoup(resp.text, "html.parser")
+    return [
+        f"{MIRROR_URL}/user/{author}/{BOARD_LOWER}?t=article",
+        f"{MIRROR_URL}/user/{author}?t=article",
+        f"{MIRROR_URL}/user/{author}",
+    ]
+
+
+def _parse_mirror_rows(page: str) -> list[dict]:
+    """Article rows on a mirror user page: [{id, title, url}].
+
+    Any anchor whose href carries a SportLottery article id counts. The title
+    comes from a `.thread-title` element when present, else the anchor's own
+    text — so a renamed title class doesn't blind the mirror.
+    """
+    soup = BeautifulSoup(page, "html.parser")
     out: dict[str, dict] = {}
     for a in soup.select("a[href]"):
         m = _MIRROR_HREF_ID_RE.search(a.get("href", ""))
         if not m:
             continue
         title_el = a.find(class_="thread-title")
-        if title_el is None:
+        title = (title_el or a).get_text(strip=True)
+        if not title:
             continue
         out.setdefault(
             m.group(1),
-            {
-                "id": m.group(1),
-                "title": title_el.get_text(strip=True),
-                "url": article_url(m.group(1)),
-            },
+            {"id": m.group(1), "title": title, "url": article_url(m.group(1))},
         )
     return list(out.values())
+
+
+def _from_mirror(author: str) -> tuple[list[dict], bool]:
+    """(articles newest-first, mirror_broken) from the mirror user page.
+
+    Tries each candidate URL until one yields rows. mirror_broken mirrors the
+    board canary: a substantial page that parsed to nothing — a mirror markup
+    change. Raises RequestException only when every candidate was unreachable,
+    so a reachable-but-empty mirror is reported as data, not an outage.
+    """
+    broken = False
+    last_err: Exception | None = None
+    for url in _mirror_urls(author):
+        try:
+            text = _get(url).text
+        except requests.RequestException as err:
+            last_err = err
+            continue
+        rows = _parse_mirror_rows(text)
+        if rows:
+            ordered = sorted(rows, key=lambda a: _posted_at(a["id"]), reverse=True)
+            return ordered, False
+        if len(text) > _MIN_BOARD_PAGE_BYTES:
+            broken = True  # a real page that parsed to nothing
+    if last_err is not None and not broken:
+        raise last_err
+    return [], broken
 
 
 def search_author(author: str) -> Scan:
@@ -220,44 +264,63 @@ def search_author(author: str) -> Scan:
          article is fetched.
       2. PTT author search (www.ptt.cc) — same host, finds posts that have
          scrolled off the index window; its index lags the board by minutes.
-      3. mirror /user page (pttweb.cc) — a different host and markup, so it
+      3. mirror user page (pttweb.cc) — a different host and markup, so it
          survives both a primary outage and a primary layout change.
 
     The board is primary; the other two are consulted only when it yields
     nothing — whether the author is quiet, has scrolled off, the host is
     unreachable, or the markup changed (Scan.primary_broken). Fallback results
-    are merged and de-duplicated so one broken or stale source can't hide
-    posts another still sees. Only when every source comes back empty is the
-    scan genuinely empty, which is what the health check must then see.
+    are merged and de-duplicated so one broken or stale source can't hide posts
+    another still sees. Every source's outcome is recorded in Scan.diagnostics,
+    so a blackout says which leg failed — unreachable host, stale search, or a
+    mirror that loaded but parsed to nothing — rather than a bare "found none".
     """
+    diag: dict[str, str] = {}
     primary_broken = False
     try:
         rows, primary_broken = _from_board_index(author)
+        diag["board"] = (
+            "live page, 0 rows parsed (markup change?)"
+            if primary_broken
+            else f"{len(rows)} by {author} (board reachable)"
+        )
         if rows:
-            return Scan(rows, "board", primary_broken)
-    except requests.RequestException:
+            return Scan(rows, "board", primary_broken, diag)
+    except requests.RequestException as err:
+        diag["board"] = f"unreachable ({type(err).__name__})"
         print("primary board index unreachable")
 
-    if primary_broken:
-        print("board index parsed no rows on a live page — trying fallbacks")
-    # Consulted only when the board yields nothing. search is same-host but
-    # fresher than the mirror; mirror is a different host/markup and the last
-    # line of defence against a primary change.
     merged: dict[str, dict] = {}
     used: list[str] = []
-    for name, fn in (("search", _from_search), ("mirror", _from_mirror)):
-        try:
-            found = fn(author)
-        except requests.RequestException:
-            print(f"{name} source unreachable")
-            continue
+
+    try:
+        found = _from_search(author)
+        diag["search"] = f"{len(found)} rows"
         if found:
-            used.append(name)
+            used.append("search")
         for a in found:
             merged.setdefault(a["id"], a)
+    except requests.RequestException as err:
+        diag["search"] = f"unreachable ({type(err).__name__})"
+        print("search source unreachable")
+
+    try:
+        found, mirror_broken = _from_mirror(author)
+        diag["mirror"] = (
+            "live page, 0 rows parsed (markup change?)"
+            if mirror_broken
+            else f"{len(found)} rows"
+        )
+        if found:
+            used.append("mirror")
+        for a in found:
+            merged.setdefault(a["id"], a)
+    except requests.RequestException as err:
+        diag["mirror"] = f"unreachable ({type(err).__name__})"
+        print("mirror source unreachable")
 
     ordered = sorted(merged.values(), key=lambda a: _posted_at(a["id"]), reverse=True)
-    return Scan(ordered, "+".join(used) if used else "none", primary_broken)
+    return Scan(ordered, "+".join(used) if used else "none", primary_broken, diag)
 
 
 def fetch_article(article_id: str) -> dict:

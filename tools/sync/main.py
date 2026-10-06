@@ -147,6 +147,7 @@ def _track_scan_health(cfg: Config, state: dict, author: str, scan: "feed.Scan")
       one waits ZERO_SCAN_ALERT_AFTER polls. Alert once per outage.
     """
     count = len(scan.articles)
+    diag = "\n".join(f"· {k}: {v}" for k, v in scan.diagnostics.items())
     record = state.setdefault("scan_health", {}).setdefault(
         author,
         {"zero_streak": 0, "alerted": False, "last_count": 0, "parser_alerted": False},
@@ -166,6 +167,8 @@ def _track_scan_health(cfg: Config, state: dict, author: str, scan: "feed.Scan")
                     "主站板面掃不到任何文章,且所有備援來源也都掃不到。\n"
                     "PTT 可能已改版,文章列表解析失效。"
                 )
+            if diag:
+                msg += f"\n\n各來源狀態:\n{diag}"
             try:
                 notify.broadcast(cfg.telegram_bot_token, cfg.telegram_chat_ids, msg)
                 record["parser_alerted"] = True
@@ -183,14 +186,15 @@ def _track_scan_health(cfg: Config, state: dict, author: str, scan: "feed.Scan")
     if record["zero_streak"] < ZERO_SCAN_ALERT_AFTER or record["alerted"]:
         return
     record["alerted"] = True
+    msg = (
+        f"⚠️ 已連續 {record['zero_streak']} 次掃不到 {author} 的任何文章\n"
+        f"(上次正常掃到 {record['last_count']} 篇)\n"
+        "PTT 可能已改版,文章列表解析失效"
+    )
+    if diag:
+        msg += f"\n\n各來源狀態:\n{diag}"
     try:
-        notify.broadcast(
-            cfg.telegram_bot_token,
-            cfg.telegram_chat_ids,
-            f"⚠️ 已連續 {record['zero_streak']} 次掃不到 {author} 的任何文章\n"
-            f"(上次正常掃到 {record['last_count']} 篇)\n"
-            "PTT 可能已改版,文章列表解析失效",
-        )
+        notify.broadcast(cfg.telegram_bot_token, cfg.telegram_chat_ids, msg)
     except Exception:
         # Un-latch so the next poll tries the alert again.
         record["alerted"] = False
@@ -201,7 +205,7 @@ def _scan_author(cfg: Config, state: dict, author: str, first_run: bool) -> None
     seen = state["seen"]
     scan = feed.search_author(author)
     entries = scan.articles
-    print(f"scan: {len(entries)} items (source={scan.source})")
+    print(f"scan: {len(entries)} items (source={scan.source}) {dict(scan.diagnostics)}")
     _track_scan_health(cfg, state, author, scan)
 
     for entry in entries:
