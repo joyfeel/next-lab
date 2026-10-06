@@ -1060,14 +1060,14 @@
   "last_heartbeat_date": "2026-07-31",
   "scan_health": {
     "lotterywin": {
-      "zero_streak": 200,
+      "zero_streak": 201,
       "alerted": true,
       "last_count": 9,
       "parser_alerted": false,
       "last_diag": {
         "board": "unreachable (HTTP 403)",
         "search": "unreachable (HTTP 403)",
-        "mirror": "unreachable (HTTP 502)"
+        "mirror": "unreachable (HTTP 530)"
       }
     }
   },
