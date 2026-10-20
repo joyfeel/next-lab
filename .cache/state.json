@@ -1085,6 +1085,10 @@
     },
     "M.1792513168.A.574": {
       "status": "notified"
+    },
+    "M.1792514129.A.EBA": {
+      "status": "pending",
+      "attempts": 0
     }
   },
   "last_heartbeat_date": "2026-07-31",
