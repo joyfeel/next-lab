@@ -1099,8 +1099,10 @@
       "status": "notified"
     },
     "M.1792778652.A.45F": {
-      "status": "pending",
-      "attempts": 8
+      "status": "notified"
+    },
+    "M.1792782003.A.CC4": {
+      "status": "notified"
     }
   },
   "last_heartbeat_date": "2026-07-31",
