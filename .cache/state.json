@@ -1132,8 +1132,7 @@
       "status": "notified"
     },
     "M.1792952601.A.E8D": {
-      "status": "pending",
-      "attempts": 0
+      "status": "notified"
     }
   },
   "last_heartbeat_date": "2026-07-31",
