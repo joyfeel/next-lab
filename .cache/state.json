@@ -1150,8 +1150,7 @@
       "status": "failed"
     },
     "M.1793126526.A.176": {
-      "status": "pending",
-      "attempts": 0
+      "status": "notified"
     }
   },
   "last_heartbeat_date": "2026-07-31",
