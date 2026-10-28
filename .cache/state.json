@@ -1164,7 +1164,7 @@
       "last_count": 10,
       "parser_alerted": false,
       "last_diag": {
-        "board": "unreachable (HTTP 403)",
+        "board": "unreachable (ReadTimeout)",
         "search": "unreachable (HTTP 403)",
         "mirror": "10 rows"
       }
